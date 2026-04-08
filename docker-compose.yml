@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: auction_bot
+      POSTGRES_USER: auction_bot
+      POSTGRES_PASSWORD: auction_bot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auction_bot -d auction_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      AUCTION_CHANNEL_ID: ${AUCTION_CHANNEL_ID}
+      DATABASE_URL: postgresql://auction_bot:auction_bot@db:5432/auction_bot?schema=public
+
+volumes:
+  postgres_data:

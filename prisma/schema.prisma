@@ -1,0 +1,39 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Card {
+  id             Int      @id
+  cardUrl        String?
+  coverMid       String
+  characterName  String?
+  authorId       Int?
+  authorUsername String
+  titleMainName  String
+  titleDir       String
+  titleId        Int
+
+  auction Auction?
+}
+
+model Auction {
+  id         String   @id @default(cuid())
+  cardId     Int      @unique
+  startPrice Int?
+  startTime  DateTime?
+  starterTelegramId       String?
+  starterTelegramUsername String?
+  channelId  String
+  createdAt  DateTime @default(now())
+
+  card Card @relation(fields: [cardId], references: [id])
+}
