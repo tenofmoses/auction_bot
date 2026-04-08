@@ -15,6 +15,14 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
 
     if (!isAuctionChannel && !isPrivateChat) return;
 
+    if (
+      isPrivateChat &&
+      (normalizedText?.toLowerCase() === "/start" || normalizedText?.toLowerCase() === "/help")
+    ) {
+      await bot.sendMessage(chatId, "Привет. Отправь команду в формате:\nаукцион https://remanga.org/card/145851 [цена|время]");
+      return;
+    }
+
     if (isPrivateChat && normalizedText?.toLowerCase() === "аукцион") {
       await bot.sendMessage(chatId, "Отправь команду в формате:\nаукцион https://remanga.org/card/145851 [цена|время]");
       return;
@@ -23,7 +31,12 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
     if (!normalizedText || !normalizedText.toLowerCase().startsWith("аукцион ")) return;
 
     const command = parseAuctionCommand(normalizedText);
-    if (!command) return;
+    if (!command) {
+      if (isPrivateChat) {
+        await bot.sendMessage(chatId, "Не удалось разобрать команду.\nФормат: аукцион https://remanga.org/card/145851 [цена|время]");
+      }
+      return;
+    }
 
     try {
       const auctionDetails = await createAuction(prisma, command, cfg.AUCTION_CHANNEL_ID, {

@@ -17,6 +17,12 @@ declare module 'node-telegram-bot-api' {
     polling?: boolean;
   };
 
+  export type PollingError = {
+    code?: string;
+    message?: string;
+    response?: unknown;
+  };
+
   export type SendMessageOptions = {
     parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
     disable_web_page_preview?: boolean;
@@ -25,6 +31,8 @@ declare module 'node-telegram-bot-api' {
   export default class TelegramBot {
     constructor(token: string, options?: TelegramBotOptions);
     on(event: 'message', listener: (msg: Message) => void | Promise<void>): void;
+    on(event: 'polling_error', listener: (error: PollingError) => void | Promise<void>): void;
+    on(event: 'error', listener: (error: PollingError) => void | Promise<void>): void;
     sendMessage(chatId: number | string, text: string, options?: SendMessageOptions): Promise<unknown>;
   }
 }
