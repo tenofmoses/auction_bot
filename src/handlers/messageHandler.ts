@@ -95,7 +95,8 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
     });
 
     try {
-      const auctionDetails = await createAuction(prisma, command, cfg.AUCTION_CHANNEL_ID, {
+      const targetAuctionChatId = isPrivateChat ? String(chatId) : cfg.AUCTION_CHANNEL_ID;
+      const auctionDetails = await createAuction(prisma, command, targetAuctionChatId, {
         telegramId: msg.from?.id ? String(msg.from.id) : null,
         telegramUsername: msg.from?.username ?? null,
       });
@@ -117,9 +118,28 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
         return;
       }
 
-      await startAuctionIfDue(prisma, bot, auctionDetails.auctionId);
-      if (isPrivateChat) {
-        await bot.sendMessage(chatId, "Аукцион запущен и опубликован в канале.");
+      try {
+        await startAuctionIfDue(prisma, bot, auctionDetails.auctionId);
+        if (isPrivateChat) {
+          await bot.sendMessage(chatId, "Аукцион запущен.");
+        }
+      } catch (publishError) {
+        console.error("[message] Failed to publish auction to channel", {
+          auctionId: auctionDetails.auctionId,
+          channelId: targetAuctionChatId,
+          error: publishError instanceof Error ? publishError.message : String(publishError),
+        });
+
+        if (isPrivateChat) {
+          await bot.sendMessage(
+            chatId,
+            [
+              "Аукцион создан, но не удалось опубликовать его в чат.",
+              `Целевой chat_id: ${targetAuctionChatId}.`,
+              "Проверь права бота и корректность chat_id.",
+            ].join("\n"),
+          );
+        }
       }
     } catch (error) {
       console.error("[message] Failed to create auction", {

@@ -1,22 +1,30 @@
 -- CreateEnum
-CREATE TYPE "AuctionStatus" AS ENUM ('PENDING', 'ACTIVE', 'ENDED');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type WHERE typname = 'AuctionStatus'
+  ) THEN
+    CREATE TYPE "AuctionStatus" AS ENUM ('PENDING', 'ACTIVE', 'ENDED');
+  END IF;
+END
+$$;
 
 -- AlterTable
-ALTER TABLE "Auction"
-ADD COLUMN "status" "AuctionStatus" NOT NULL DEFAULT 'PENDING',
-ADD COLUMN "startedAt" TIMESTAMP(3),
-ADD COLUMN "endedAt" TIMESTAMP(3),
-ADD COLUMN "lastBidAt" TIMESTAMP(3),
-ADD COLUMN "messageId" INTEGER,
-ADD COLUMN "currentPrice" INTEGER,
-ADD COLUMN "winnerTelegramId" TEXT,
-ADD COLUMN "winnerTelegramUsername" TEXT;
+ALTER TABLE IF EXISTS "Auction"
+ADD COLUMN IF NOT EXISTS "status" "AuctionStatus" NOT NULL DEFAULT 'PENDING',
+ADD COLUMN IF NOT EXISTS "startedAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "endedAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "lastBidAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "messageId" INTEGER,
+ADD COLUMN IF NOT EXISTS "currentPrice" INTEGER,
+ADD COLUMN IF NOT EXISTS "winnerTelegramId" TEXT,
+ADD COLUMN IF NOT EXISTS "winnerTelegramUsername" TEXT;
 
 -- CreateTable
-CREATE TABLE "Bid" (
-  "id" TEXT NOT NULL,
-  "auctionId" TEXT NOT NULL,
-  "increment" INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS "Bid" (
+"id" TEXT NOT NULL,
+"auctionId" TEXT NOT NULL,
+"increment" INTEGER NOT NULL,
   "totalPrice" INTEGER NOT NULL,
   "bidderTelegramId" TEXT NOT NULL,
   "bidderTelegramUsername" TEXT,
@@ -26,7 +34,20 @@ CREATE TABLE "Bid" (
 );
 
 -- CreateIndex
-CREATE INDEX "Bid_auctionId_createdAt_idx" ON "Bid"("auctionId", "createdAt" DESC);
+CREATE INDEX IF NOT EXISTS "Bid_auctionId_createdAt_idx" ON "Bid"("auctionId", "createdAt" DESC);
 
 -- AddForeignKey
-ALTER TABLE "Bid" ADD CONSTRAINT "Bid_auctionId_fkey" FOREIGN KEY ("auctionId") REFERENCES "Auction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF to_regclass('"Auction"') IS NOT NULL
+     AND to_regclass('"Bid"') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint WHERE conname = 'Bid_auctionId_fkey'
+     ) THEN
+    ALTER TABLE "Bid"
+      ADD CONSTRAINT "Bid_auctionId_fkey"
+      FOREIGN KEY ("auctionId") REFERENCES "Auction"("id")
+      ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END
+$$;
