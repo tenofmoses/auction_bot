@@ -51,6 +51,15 @@ declare module 'node-telegram-bot-api' {
     caption?: string;
   };
 
+  export type EditMessageOptions = {
+    chat_id: number | string;
+    message_id: number;
+    parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
+    reply_markup?: {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+  };
+
   export type BotUser = {
     id: number;
     username?: string;
@@ -69,5 +78,7 @@ declare module 'node-telegram-bot-api' {
     sendPhoto(chatId: number | string, photo: string, options?: SendPhotoOptions): Promise<Message>;
     deleteMessage(chatId: number | string, messageId: number): Promise<boolean>;
     answerCallbackQuery(callbackQueryId: string, options?: { text?: string; show_alert?: boolean }): Promise<boolean>;
+    editMessageCaption(caption: string, options: EditMessageOptions): Promise<Message | boolean>;
+    editMessageText(text: string, options: EditMessageOptions): Promise<Message | boolean>;
   }
 }

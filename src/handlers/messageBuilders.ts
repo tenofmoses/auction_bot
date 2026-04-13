@@ -13,34 +13,31 @@ function formatStartTime(startTime: Date | null): string {
   })} МСК`;
 }
 
-function buildUserLink(telegramId: string | null, telegramUsername: string | null): string {
+function formatUserName(telegramId: string | null, telegramUsername: string | null): string {
   if (telegramUsername) {
-    return `<a href="https://t.me/${telegramUsername}">@${telegramUsername}</a>`;
+    return `@${telegramUsername}`;
   }
   if (telegramId) {
-    return `<a href="tg://user?id=${telegramId}">user_${telegramId}</a>`;
+    return `user_${telegramId}`;
   }
   return "неизвестно";
 }
 
 function formatBidLine(bid: RecentBid, index: number): string {
-  const bidder = buildUserLink(bid.bidderTelegramId, bid.bidderTelegramUsername);
+  const bidder = formatUserName(bid.bidderTelegramId, bid.bidderTelegramUsername);
   return `${index + 1}. ${bidder} — ${bid.totalPrice}`;
 }
 
-function formatTimeSinceLastBid(lastBidAt: Date | null): string {
-  if (!lastBidAt) return "нет ставок";
-  const diffMs = Date.now() - lastBidAt.getTime();
-  if (diffMs <= 0) return "только что";
-
-  const totalSeconds = Math.floor(diffMs / 1000);
+function formatTimeLeft(remainingMs: number): string {
+  const safeMs = Math.max(0, remainingMs);
+  const totalSeconds = Math.floor(safeMs / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  if (hours > 0) return `${hours} ч ${minutes} мин назад`;
-  if (minutes > 0) return `${minutes} мин ${seconds} сек назад`;
-  return `${seconds} сек назад`;
+  if (hours > 0) return `${hours} ч ${minutes} мин ${seconds} сек`;
+  if (minutes > 0) return `${minutes} мин ${seconds} сек`;
+  return `${seconds} сек`;
 }
 
 export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): string {
@@ -73,12 +70,15 @@ export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): stri
   ].join("\n");
 }
 
-export function buildAuctionLiveCaption(details: AuctionViewDetails): string {
+export function buildAuctionLiveCaption(
+  details: AuctionViewDetails,
+  outbidUser: string | null = null,
+  remainingMs: number | null = null,
+): string {
   const mangaUrl = `https://remanga.org/manga/${details.titleDir}/main`;
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
-  const winner = buildUserLink(details.winnerTelegramId, details.winnerTelegramUsername);
+  const winner = formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
   const hasBids = details.lastBids.length > 0;
-  const lastBidAt = hasBids ? details.lastBids[0].createdAt : null;
   const lastBidsBlock = hasBids
     ? details.lastBids.map((bid, index) => formatBidLine(bid, index)).join("\n")
     : "Ставок пока нет";
@@ -93,15 +93,18 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails): string {
     "",
     `💸 Текущий выкуп: <b>${details.currentPrice}</b>`,
     `🏆 Лидер: ${hasBids ? winner : "пока нет"}`,
-    `⏱ С последней ставки: ${formatTimeSinceLastBid(lastBidAt)}`,
+    `⏱️ До конца аукциона: ${formatTimeLeft(remainingMs ?? 0)}`,
+    outbidUser ? `⚠️ ${outbidUser}, вашу ставку перебили` : null,
     "",
     "📝 Последние 3 ставки:",
     lastBidsBlock,
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 }
 
 export function buildAuctionFinishedCaption(details: AuctionViewDetails): string {
-  const winner = buildUserLink(details.winnerTelegramId, details.winnerTelegramUsername);
+  const winner = formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
   return [
     buildAuctionLiveCaption({ ...details, status: "ENDED" }),
     "",

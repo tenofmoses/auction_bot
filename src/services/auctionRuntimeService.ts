@@ -8,6 +8,11 @@ const BID_TIMEOUT_MS = 5 * 60 * 1000;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
 
+function getRemainingMs(auction: AuctionWithCardAndBids, nowMs: number): number {
+  const anchor = auction.lastBidAt ?? auction.startedAt ?? auction.createdAt;
+  return Math.max(0, BID_TIMEOUT_MS - (nowMs - anchor.getTime()));
+}
+
 function toCoverUrl(coverMid: string): string {
   if (coverMid.startsWith("https://") || coverMid.startsWith("http://")) return coverMid;
   if (coverMid.startsWith("//")) return `https:${coverMid}`;
@@ -47,9 +52,11 @@ async function sendAuctionMessage(
   auction: AuctionWithCardAndBids,
   withButtons: boolean,
   isFinal: boolean,
+  outbidUser: string | null = null,
 ) {
   const view = mapAuctionView(auction);
-  const caption = isFinal ? buildAuctionFinishedCaption(view) : buildAuctionLiveCaption(view);
+  const remainingMs = getRemainingMs(auction, Date.now());
+  const caption = isFinal ? buildAuctionFinishedCaption(view) : buildAuctionLiveCaption(view, outbidUser, remainingMs);
   const replyMarkup = withButtons ? { reply_markup: buildBidKeyboard(auction.id) } : undefined;
 
   try {
@@ -75,6 +82,7 @@ async function publishLiveMessage(
   bot: TelegramBot,
   auction: AuctionWithCardAndBids,
   deleteMessageId: number | null,
+  outbidUser: string | null = null,
 ) {
   if (deleteMessageId) {
     try {
@@ -88,13 +96,47 @@ async function publishLiveMessage(
     }
   }
 
-  const sent = await sendAuctionMessage(bot, auction.channelId, auction, true, false);
+  const sent = await sendAuctionMessage(bot, auction.channelId, auction, true, false, outbidUser);
   if (!sent.message_id) return;
 
   await prisma.auction.update({
     where: { id: auction.id },
     data: { messageId: sent.message_id },
   });
+}
+
+async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: AuctionWithCardAndBids): Promise<void> {
+  if (!auction.messageId || auction.status !== "ACTIVE") return;
+
+  const remainingMs = getRemainingMs(auction, Date.now());
+  const caption = buildAuctionLiveCaption(mapAuctionView(auction), null, remainingMs);
+  const editOptions = {
+    chat_id: auction.channelId,
+    message_id: auction.messageId,
+    parse_mode: "HTML" as const,
+    reply_markup: buildBidKeyboard(auction.id),
+  };
+
+  try {
+    await bot.editMessageCaption(caption, editOptions);
+    return;
+  } catch (error) {
+    const err = error instanceof Error ? error.message : String(error);
+    if (err.includes("message is not modified")) return;
+    // Could be text-only message after fallback.
+  }
+
+  try {
+    await bot.editMessageText(caption, editOptions);
+  } catch (error) {
+    const err = error instanceof Error ? error.message : String(error);
+    if (err.includes("message is not modified")) return;
+    console.error("[auction-runtime] Failed to refresh auction countdown", {
+      auctionId: auction.id,
+      messageId: auction.messageId,
+      error: err,
+    });
+  }
 }
 
 export async function startAuctionIfDue(prisma: PrismaClient, bot: TelegramBot, auctionId: string): Promise<void> {
@@ -161,6 +203,12 @@ export async function handleBidCallback(
   }
 
   const now = new Date();
+  const previousLeader =
+    current.winnerTelegramId && current.winnerTelegramId !== String(query.from.id)
+      ? current.winnerTelegramUsername
+        ? `@${current.winnerTelegramUsername}`
+        : `user_${current.winnerTelegramId}`
+      : null;
   const lastBidTime = current.lastBidAt ?? current.startedAt ?? current.createdAt;
   if (now.getTime() - lastBidTime.getTime() >= BID_TIMEOUT_MS) {
     await finishAuction(prisma, bot, current.id);
@@ -217,7 +265,7 @@ export async function handleBidCallback(
     return;
   }
 
-  await publishLiveMessage(prisma, bot, updated, previousMessageId);
+  await publishLiveMessage(prisma, bot, updated, previousMessageId, previousLeader);
   await bot.answerCallbackQuery(query.id, { text: `Ставка +${increment} принята` });
 }
 
@@ -349,20 +397,46 @@ async function processExpiredAuctions(prisma: PrismaClient, bot: TelegramBot): P
   }
 }
 
+async function refreshActiveAuctionCountdowns(prisma: PrismaClient, bot: TelegramBot): Promise<void> {
+  const activeAuctions = await prisma.auction.findMany({
+    where: { status: "ACTIVE" },
+    include: {
+      card: true,
+      bids: { orderBy: { createdAt: "desc" }, take: 3 },
+    },
+    take: 20,
+  });
+
+  for (const auction of activeAuctions) {
+    const remainingMs = getRemainingMs(auction, Date.now());
+    if (remainingMs <= 0) {
+      await finishAuction(prisma, bot, auction.id);
+      continue;
+    }
+    await refreshAuctionMessageCountdown(bot, auction);
+  }
+}
+
 export function initAuctionRuntime(prisma: PrismaClient, bot: TelegramBot): void {
+  let isTickRunning = false;
   const tick = async () => {
+    if (isTickRunning) return;
+    isTickRunning = true;
     try {
       await processPendingStarts(prisma, bot);
       await processExpiredAuctions(prisma, bot);
+      await refreshActiveAuctionCountdowns(prisma, bot);
     } catch (error) {
       console.error("[auction-runtime] Tick failed", {
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      isTickRunning = false;
     }
   };
 
   void tick();
   setInterval(() => {
     void tick();
-  }, 30_000);
+  }, 1_000);
 }
