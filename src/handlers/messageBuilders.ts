@@ -15,7 +15,7 @@ function formatStartTime(startTime: Date | null): string {
 
 function formatUserName(telegramId: string | null, telegramUsername: string | null): string {
   if (telegramUsername) {
-    return `@${telegramUsername}`;
+    return telegramUsername;
   }
   if (telegramId) {
     return `user_${telegramId}`;
@@ -70,11 +70,7 @@ export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): stri
   ].join("\n");
 }
 
-export function buildAuctionLiveCaption(
-  details: AuctionViewDetails,
-  outbidUser: string | null = null,
-  remainingMs: number | null = null,
-): string {
+export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs: number | null = null): string {
   const mangaUrl = `https://remanga.org/manga/${details.titleDir}/main`;
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
   const winner = formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
@@ -94,13 +90,10 @@ export function buildAuctionLiveCaption(
     `💸 Текущий выкуп: <b>${details.currentPrice}</b>`,
     `🏆 Лидер: ${hasBids ? winner : "пока нет"}`,
     `⏱️ До конца аукциона: ${formatTimeLeft(remainingMs ?? 0)}`,
-    outbidUser ? `⚠️ ${outbidUser}, вашу ставку перебили` : null,
     "",
     "📝 Последние 3 ставки:",
     lastBidsBlock,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
+  ].join("\n");
 }
 
 export function buildAuctionFinishedCaption(details: AuctionViewDetails): string {

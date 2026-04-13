@@ -3,8 +3,7 @@ import type TelegramBot from "node-telegram-bot-api";
 import { buildAuctionFinishedCaption, buildAuctionLiveCaption } from "../handlers/messageBuilders.js";
 import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } from "../types/auction.js";
 
-// const BID_TIMEOUT_MS = 60 * 60 * 1000;
-const BID_TIMEOUT_MS = 5 * 60 * 1000;
+const BID_TIMEOUT_MS = 60 * 60 * 1000;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
 
@@ -52,11 +51,10 @@ async function sendAuctionMessage(
   auction: AuctionWithCardAndBids,
   withButtons: boolean,
   isFinal: boolean,
-  outbidUser: string | null = null,
 ) {
   const view = mapAuctionView(auction);
   const remainingMs = getRemainingMs(auction, Date.now());
-  const caption = isFinal ? buildAuctionFinishedCaption(view) : buildAuctionLiveCaption(view, outbidUser, remainingMs);
+  const caption = isFinal ? buildAuctionFinishedCaption(view) : buildAuctionLiveCaption(view, remainingMs);
   const replyMarkup = withButtons ? { reply_markup: buildBidKeyboard(auction.id) } : undefined;
 
   try {
@@ -82,7 +80,6 @@ async function publishLiveMessage(
   bot: TelegramBot,
   auction: AuctionWithCardAndBids,
   deleteMessageId: number | null,
-  outbidUser: string | null = null,
 ) {
   if (deleteMessageId) {
     try {
@@ -96,7 +93,7 @@ async function publishLiveMessage(
     }
   }
 
-  const sent = await sendAuctionMessage(bot, auction.channelId, auction, true, false, outbidUser);
+  const sent = await sendAuctionMessage(bot, auction.channelId, auction, true, false);
   if (!sent.message_id) return;
 
   await prisma.auction.update({
@@ -109,7 +106,7 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
   if (!auction.messageId || auction.status !== "ACTIVE") return;
 
   const remainingMs = getRemainingMs(auction, Date.now());
-  const caption = buildAuctionLiveCaption(mapAuctionView(auction), null, remainingMs);
+  const caption = buildAuctionLiveCaption(mapAuctionView(auction), remainingMs);
   const editOptions = {
     chat_id: auction.channelId,
     message_id: auction.messageId,
@@ -265,7 +262,10 @@ export async function handleBidCallback(
     return;
   }
 
-  await publishLiveMessage(prisma, bot, updated, previousMessageId, previousLeader);
+  await publishLiveMessage(prisma, bot, updated, previousMessageId);
+  if (previousLeader) {
+    await bot.sendMessage(updated.channelId, `⚠️ ${previousLeader}, вашу ставку перебили.`);
+  }
   await bot.answerCallbackQuery(query.id, { text: `Ставка +${increment} принята` });
 }
 
@@ -353,11 +353,21 @@ export async function cancelAuction(
   }
 
   const byText = canceledByUsername ? `@${canceledByUsername}` : "организатором";
-  await bot.sendMessage(
-    ended.channelId,
-    `⛔️ Аукцион прерван ${byText}.\n🃏 Карта: ${ended.card.cardUrl ?? `https://remanga.org/card/${ended.card.id}`}`,
-    { disable_web_page_preview: true },
-  );
+  const cancelText = `⛔️ Аукцион прерван ${byText}.\n🃏 Карта: ${ended.card.cardUrl ?? `https://remanga.org/card/${ended.card.id}`}`;
+  try {
+    await bot.sendPhoto(ended.channelId, toCoverUrl(ended.card.coverMid), {
+      caption: cancelText,
+      parse_mode: "HTML",
+    });
+  } catch (error) {
+    console.error("[auction-runtime] Failed to send canceled auction photo, fallback to text", {
+      auctionId: ended.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await bot.sendMessage(ended.channelId, cancelText, {
+      disable_web_page_preview: true,
+    });
+  }
 
   console.log("[auction-runtime] Auction canceled", {
     auctionId: ended.id,
