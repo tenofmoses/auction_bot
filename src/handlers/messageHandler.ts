@@ -83,11 +83,11 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     });
 
     const repliedMessageId = msg.reply_to_message?.message_id ?? null;
-    if (repliedMessageId && msg.from?.id) {
+    const sender = msg.from;
+    if (repliedMessageId && sender?.id) {
       let replyAuction = await prisma.auction.findFirst({
         where: {
           channelId: AUCTION_TARGET_CHAT_ID,
-          channelThreadId: AUCTION_TARGET_THREAD_ID,
           messageId: repliedMessageId,
           status: { in: ["PENDING", "ACTIVE"] },
         },
@@ -102,11 +102,10 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
         replyAuction = await prisma.auction.findFirst({
           where: {
             channelId: AUCTION_TARGET_CHAT_ID,
-            channelThreadId: AUCTION_TARGET_THREAD_ID,
             status: { in: ["PENDING", "ACTIVE"] },
             OR: [
-              { starterTelegramId: String(msg.from.id) },
-              msg.from.username ? { starterTelegramUsername: msg.from.username } : undefined,
+              { starterTelegramId: String(sender.id) },
+              sender.username ? { starterTelegramUsername: sender.username } : undefined,
             ].filter(Boolean) as Array<{ starterTelegramId?: string; starterTelegramUsername?: string }>,
           },
           select: {
@@ -119,8 +118,8 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
       }
 
       if (replyAuction) {
-        const senderId = String(msg.from.id);
-        const senderUsername = msg.from.username?.toLowerCase() ?? null;
+        const senderId = String(sender.id);
+        const senderUsername = sender.username?.toLowerCase() ?? null;
         const organizerId = replyAuction.starterTelegramId;
         const organizerUsername = replyAuction.starterTelegramUsername?.toLowerCase() ?? null;
         const isOrganizer = organizerId
@@ -141,7 +140,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
           return;
         }
 
-        await cancelAuction(prisma, bot, replyAuction.id, msg.from.username ?? null);
+        await cancelAuction(prisma, bot, replyAuction.id, sender.username ?? null);
         return;
       }
 
@@ -182,7 +181,6 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
         prisma,
         command,
         AUCTION_TARGET_CHAT_ID,
-        AUCTION_TARGET_THREAD_ID,
         {
           telegramId: msg.from?.id ? String(msg.from.id) : null,
           telegramUsername: msg.from?.username ?? null,

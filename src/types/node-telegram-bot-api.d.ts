@@ -42,6 +42,7 @@ declare module 'node-telegram-bot-api' {
   export type SendMessageOptions = {
     parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
     disable_web_page_preview?: boolean;
+    message_thread_id?: number;
     reply_markup?: {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
@@ -54,6 +55,7 @@ declare module 'node-telegram-bot-api' {
   export type EditMessageOptions = {
     chat_id: number | string;
     message_id: number;
+    message_thread_id?: number;
     parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
     reply_markup?: {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
