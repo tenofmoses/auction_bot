@@ -31,6 +31,8 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
     const isPrivateChat = chatType === "private";
 
     console.log("[message] Received update", {
+      messageId: msg.message_id ?? null,
+      messageThreadId: msg.message_thread_id ?? null,
       chatId,
       chatType,
       userId: msg.from?.id ?? null,
@@ -142,11 +144,13 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
         }
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[message] Failed to create auction", {
         chatId,
         text: normalizedText,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
+
       await bot.sendMessage(chatId, "Ошибка при создании аукциона");
     }
   });

@@ -27,12 +27,12 @@ model Card {
   titleDir       String
   titleId        Int
 
-  auction Auction?
+  auctions Auction[]
 }
 
 model Auction {
   id         String   @id @default(cuid())
-  cardId     Int      @unique
+  cardId     Int
   startPrice Int?
   startTime  DateTime?
   status     AuctionStatus @default(PENDING)
@@ -50,6 +50,8 @@ model Auction {
 
   card Card @relation(fields: [cardId], references: [id])
   bids Bid[]
+
+  @@index([cardId])
 }
 
 model Bid {

@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS "Auction" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "Auction_cardId_key" ON "Auction"("cardId");
+CREATE INDEX IF NOT EXISTS "Auction_cardId_idx" ON "Auction"("cardId");
 
 -- AddForeignKey
 DO $$
