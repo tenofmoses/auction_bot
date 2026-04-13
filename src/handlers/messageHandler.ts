@@ -3,7 +3,14 @@ import type TelegramBot from "node-telegram-bot-api";
 import type { AppConfig } from "../types/app.js";
 import { createAuction, parseAuctionCommand } from "../services/auctionService.js";
 import { buildAuctionPlannedMessage } from "./messageBuilders.js";
-import { handleBidCallback, startAuctionIfDue } from "../services/auctionRuntimeService.js";
+import { cancelAuction, handleBidCallback, startAuctionIfDue } from "../services/auctionRuntimeService.js";
+
+function toCoverUrl(coverMid: string): string {
+  if (coverMid.startsWith("https://") || coverMid.startsWith("http://")) return coverMid;
+  if (coverMid.startsWith("//")) return `https:${coverMid}`;
+  if (coverMid.startsWith("/")) return `https://api.remanga.org${coverMid}`;
+  return `https://${coverMid}`;
+}
 
 export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, cfg: AppConfig): void {
   bot.on("callback_query", async (query) => {
@@ -33,6 +40,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
     console.log("[message] Received update", {
       messageId: msg.message_id ?? null,
       messageThreadId: msg.message_thread_id ?? null,
+      replyToMessageId: msg.reply_to_message?.message_id ?? null,
       chatId,
       chatType,
       userId: msg.from?.id ?? null,
@@ -48,6 +56,45 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
         chatType,
       });
       return;
+    }
+
+    const repliedMessageId = msg.reply_to_message?.message_id ?? null;
+    if (repliedMessageId && msg.from?.id) {
+      const replyAuction = await prisma.auction.findFirst({
+        where: {
+          channelId: String(chatId),
+          messageId: repliedMessageId,
+          status: { in: ["PENDING", "ACTIVE"] },
+        },
+        select: {
+          id: true,
+          starterTelegramId: true,
+          starterTelegramUsername: true,
+        },
+      });
+
+      if (replyAuction) {
+        const senderId = String(msg.from.id);
+        const senderUsername = msg.from.username?.toLowerCase() ?? null;
+        const organizerId = replyAuction.starterTelegramId;
+        const organizerUsername = replyAuction.starterTelegramUsername?.toLowerCase() ?? null;
+        const isOrganizer = organizerId
+          ? organizerId === senderId
+          : Boolean(organizerUsername && senderUsername && organizerUsername === senderUsername);
+
+        if (!isOrganizer) {
+          await bot.sendMessage(chatId, "Только организатор может прервать этот аукцион.");
+          return;
+        }
+
+        if (normalizedText?.toLowerCase() !== "стоп") {
+          await bot.sendMessage(chatId, "Чтобы прервать аукцион, ответь на сообщение аукциона словом: стоп");
+          return;
+        }
+
+        await cancelAuction(prisma, bot, replyAuction.id, msg.from.username ?? null);
+        return;
+      }
     }
 
     if (
@@ -114,9 +161,34 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
       );
 
       if (isFutureStart) {
-        await bot.sendMessage(chatId, buildAuctionPlannedMessage(auctionDetails), {
-          parse_mode: "HTML",
-        });
+        const plannedText = buildAuctionPlannedMessage(auctionDetails);
+        try {
+          const sent = await bot.sendPhoto(chatId, toCoverUrl(auctionDetails.coverMid), {
+            caption: plannedText,
+            parse_mode: "HTML",
+          });
+          if (sent.message_id) {
+            await prisma.auction.update({
+              where: { id: auctionDetails.auctionId },
+              data: { messageId: sent.message_id },
+            });
+          }
+        } catch (photoError) {
+          console.error("[message] Failed to send planned auction photo, fallback to text", {
+            auctionId: auctionDetails.auctionId,
+            chatId,
+            error: photoError instanceof Error ? photoError.message : String(photoError),
+          });
+          const sent = await bot.sendMessage(chatId, plannedText, {
+            parse_mode: "HTML",
+          });
+          if (sent.message_id) {
+            await prisma.auction.update({
+              where: { id: auctionDetails.auctionId },
+              data: { messageId: sent.message_id },
+            });
+          }
+        }
         return;
       }
 

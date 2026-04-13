@@ -7,6 +7,9 @@ declare module 'node-telegram-bot-api' {
   export type Message = {
     message_id?: number;
     message_thread_id?: number;
+    reply_to_message?: {
+      message_id?: number;
+    };
     chat: Chat;
     text?: string;
     photo?: Array<{ file_id: string }>;

@@ -264,6 +264,60 @@ export async function finishAuction(prisma: PrismaClient, bot: TelegramBot, auct
   });
 }
 
+export async function cancelAuction(
+  prisma: PrismaClient,
+  bot: TelegramBot,
+  auctionId: string,
+  canceledByUsername: string | null,
+): Promise<void> {
+  const auction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    include: {
+      card: true,
+      bids: { orderBy: { createdAt: "desc" }, take: 3 },
+    },
+  });
+
+  if (!auction || auction.status === "ENDED") return;
+
+  const ended = await prisma.auction.update({
+    where: { id: auctionId },
+    data: {
+      status: "ENDED",
+      endedAt: new Date(),
+    },
+    include: {
+      card: true,
+      bids: { orderBy: { createdAt: "desc" }, take: 3 },
+    },
+  });
+
+  if (ended.messageId) {
+    try {
+      await bot.deleteMessage(ended.channelId, ended.messageId);
+    } catch (error) {
+      console.error("[auction-runtime] Failed to delete canceled auction message", {
+        auctionId: ended.id,
+        messageId: ended.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const byText = canceledByUsername ? `@${canceledByUsername}` : "организатором";
+  await bot.sendMessage(
+    ended.channelId,
+    `⛔️ Аукцион прерван ${byText}.\n🃏 Карта: ${ended.card.cardUrl ?? `https://remanga.org/card/${ended.card.id}`}`,
+    { disable_web_page_preview: true },
+  );
+
+  console.log("[auction-runtime] Auction canceled", {
+    auctionId: ended.id,
+    channelId: ended.channelId,
+    canceledByUsername,
+  });
+}
+
 async function processPendingStarts(prisma: PrismaClient, bot: TelegramBot): Promise<void> {
   const due = await prisma.auction.findMany({
     where: {

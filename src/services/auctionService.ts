@@ -17,11 +17,35 @@ export function parseAuctionCommand(commandText: string): ParsedAuctionCommand |
   for (const param of parts.slice(2)) {
     if (param.includes(":")) {
       const [hours, minutes] = param.split(":").map((value) => Number(value));
-      if (Number.isNaN(hours) || Number.isNaN(minutes)) continue;
+      if (
+        Number.isNaN(hours) ||
+        Number.isNaN(minutes) ||
+        hours < 0 ||
+        hours > 23 ||
+        minutes < 0 ||
+        minutes > 59
+      ) continue;
+
       const now = new Date();
-      const mskTime = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-      mskTime.setHours(hours, minutes, 0, 0);
-      startTime = mskTime;
+      const mskOffsetMs = 3 * 60 * 60 * 1000;
+      const nowMsk = new Date(now.getTime() + mskOffsetMs);
+
+      const targetMskUtc = Date.UTC(
+        nowMsk.getUTCFullYear(),
+        nowMsk.getUTCMonth(),
+        nowMsk.getUTCDate(),
+        hours,
+        minutes,
+        0,
+        0,
+      );
+
+      let targetUtcMs = targetMskUtc - mskOffsetMs;
+      if (targetUtcMs <= now.getTime()) {
+        targetUtcMs += 24 * 60 * 60 * 1000;
+      }
+
+      startTime = new Date(targetUtcMs);
       continue;
     }
 
