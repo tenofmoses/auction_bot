@@ -12,6 +12,25 @@ function toCoverUrl(coverMid: string): string {
   return `https://${coverMid}`;
 }
 
+function buildAuctionRulesMessage(): string {
+  return [
+    "📌 <b>Правила аукциона</b>",
+    "",
+    "1. <b>Как запустить аукцион</b>",
+    "Отправь: <code>аукцион https://remanga.org/card/145851 [цена] [HH:mm]</code>",
+    "Пример: <code>аукцион https://remanga.org/card/145851 500 22:30</code>",
+    "",
+    "2. <b>Как остановить аукцион</b>",
+    "Организатор должен ответить на сообщение аукциона словом <b>стоп</b>.",
+    "",
+    "3. <b>Как поставить ставку</b>",
+    "Нажми кнопку +50 / +100 / +500 / +1000 под сообщением аукциона.",
+    "",
+    "4. <b>Когда аукцион завершается</b>",
+    "Если в течение 1 часа после последней ставки не было новых ставок, аукцион завершается автоматически.",
+  ].join("\n");
+}
+
 export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, cfg: AppConfig): void {
   bot.on("callback_query", async (query) => {
     try {
@@ -128,7 +147,9 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
       console.log("[message] Sending private help for /start or /help", {
         chatId,
       });
-      await bot.sendMessage(chatId, "Привет. Отправь команду в формате:\nаукцион https://remanga.org/card/145851 [цена|время]");
+      await bot.sendMessage(chatId, buildAuctionRulesMessage(), {
+        parse_mode: "HTML",
+      });
       return;
     }
 
@@ -136,7 +157,9 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
       console.log("[message] Sending private help for 'аукцион'", {
         chatId,
       });
-      await bot.sendMessage(chatId, "Отправь команду в формате:\nаукцион https://remanga.org/card/145851 [цена|время]");
+      await bot.sendMessage(chatId, buildAuctionRulesMessage(), {
+        parse_mode: "HTML",
+      });
       return;
     }
 
