@@ -4,13 +4,13 @@ import { buildAuctionFinishedCaption, buildAuctionLiveCaption } from "../handler
 import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } from "../types/auction.js";
 
 const AUCTION_TARGET_THREAD_ID = 1273810;
-const BID_TIMEOUT_MS = 60 * 60 * 1000;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
 
 function getRemainingMs(auction: AuctionWithCardAndBids, nowMs: number): number {
   const anchor = auction.lastBidAt ?? auction.startedAt ?? auction.createdAt;
-  return Math.max(0, BID_TIMEOUT_MS - (nowMs - anchor.getTime()));
+  const timeoutMs = auction.bidTimeoutMinutes * 60 * 1000;
+  return Math.max(0, timeoutMs - (nowMs - anchor.getTime()));
 }
 
 function toCoverUrl(coverMid: string): string {
@@ -206,8 +206,14 @@ export async function handleBidCallback(
   }
 
   const now = new Date();
+  const outbidUser =
+    current.winnerTelegramId && current.winnerTelegramId !== String(query.from.id)
+      ? current.winnerTelegramUsername
+        ? `@${current.winnerTelegramUsername}`
+        : `user_${current.winnerTelegramId}`
+      : null;
   const lastBidTime = current.lastBidAt ?? current.startedAt ?? current.createdAt;
-  if (now.getTime() - lastBidTime.getTime() >= BID_TIMEOUT_MS) {
+  if (now.getTime() - lastBidTime.getTime() >= current.bidTimeoutMinutes * 60 * 1000) {
     await finishAuction(prisma, bot, current.id);
     await bot.answerCallbackQuery(query.id, { text: "Аукцион завершён", show_alert: true });
     return;
@@ -263,15 +269,7 @@ export async function handleBidCallback(
   }
 
   await publishLiveMessage(prisma, bot, updated, previousMessageId);
-  const outbidBidder =
-    updated.bids.length >= 2 &&
-    updated.bids[0].bidderTelegramId !== updated.bids[1].bidderTelegramId
-      ? updated.bids[1]
-      : null;
-  if (outbidBidder) {
-    const outbidUser = outbidBidder.bidderTelegramUsername
-      ? `@${outbidBidder.bidderTelegramUsername}`
-      : `user_${outbidBidder.bidderTelegramId}`;
+  if (outbidUser) {
     await bot.sendMessage(updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
       message_thread_id: AUCTION_TARGET_THREAD_ID,
     });
@@ -404,18 +402,27 @@ async function processPendingStarts(prisma: PrismaClient, bot: TelegramBot): Pro
 }
 
 async function processExpiredAuctions(prisma: PrismaClient, bot: TelegramBot): Promise<void> {
-  const threshold = new Date(Date.now() - BID_TIMEOUT_MS);
-  const expired = await prisma.auction.findMany({
+  const active = await prisma.auction.findMany({
     where: {
       status: "ACTIVE",
-      lastBidAt: { lte: threshold },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      bidTimeoutMinutes: true,
+      lastBidAt: true,
+      startedAt: true,
+      createdAt: true,
+    },
     take: 20,
   });
 
-  for (const auction of expired) {
-    await finishAuction(prisma, bot, auction.id);
+  const nowMs = Date.now();
+  for (const auction of active) {
+    const anchor = auction.lastBidAt ?? auction.startedAt ?? auction.createdAt;
+    const timeoutMs = auction.bidTimeoutMinutes * 60 * 1000;
+    if (nowMs - anchor.getTime() >= timeoutMs) {
+      await finishAuction(prisma, bot, auction.id);
+    }
   }
 }
 

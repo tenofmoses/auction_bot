@@ -35,6 +35,7 @@ model Auction {
   cardId     Int
   startPrice Int?
   startTime  DateTime?
+  bidTimeoutMinutes Int @default(60)
   status     AuctionStatus @default(PENDING)
   startedAt  DateTime?
   endedAt    DateTime?

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS "Auction" (
   "cardId" INTEGER NOT NULL,
   "startPrice" INTEGER,
   "startTime" TIMESTAMP(3),
+  "bidTimeoutMinutes" INTEGER NOT NULL DEFAULT 60,
   "starterTelegramId" TEXT,
   "starterTelegramUsername" TEXT,
   "channelId" TEXT NOT NULL,

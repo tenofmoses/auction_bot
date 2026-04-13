@@ -3,6 +3,7 @@ export type ParsedAuctionCommand = {
   cardId: number;
   startPrice: number | null;
   startTime: Date | null;
+  bidTimeoutMinutes: number;
 };
 
 export type CardApiResponse = {
@@ -27,6 +28,7 @@ export type CreatedAuctionDetails = {
   coverMid: string;
   startPrice: number | null;
   startTime: Date | null;
+  bidTimeoutMinutes: number;
   starterTelegramId: string | null;
   starterTelegramUsername: string | null;
   channelId: string;
@@ -61,6 +63,7 @@ export type AuctionWithCardAndBids = {
   status: AuctionStatusValue;
   channelId: string;
   startPrice: number | null;
+  bidTimeoutMinutes: number;
   starterTelegramId: string | null;
   starterTelegramUsername: string | null;
   currentPrice: number | null;

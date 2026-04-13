@@ -13,6 +13,7 @@ export function parseAuctionCommand(commandText: string): ParsedAuctionCommand |
 
   let startPrice: number | null = null;
   let startTime: Date | null = null;
+  let bidTimeoutMinutes = 60;
 
   for (const param of parts.slice(2)) {
     if (param.includes(":")) {
@@ -49,13 +50,23 @@ export function parseAuctionCommand(commandText: string): ParsedAuctionCommand |
       continue;
     }
 
+    const timeoutMatch = param.match(/^(\d+)(m|min|h|м|ч)$/i);
+    if (timeoutMatch) {
+      const value = Number(timeoutMatch[1]);
+      const unit = timeoutMatch[2].toLowerCase();
+      if (!Number.isNaN(value) && value > 0) {
+        bidTimeoutMinutes = unit === "h" || unit === "ч" ? value * 60 : value;
+      }
+      continue;
+    }
+
     const parsedPrice = parseInt(param, 10);
     if (!Number.isNaN(parsedPrice)) {
       startPrice = parsedPrice;
     }
   }
 
-  return { cardUrl: url, cardId, startPrice, startTime };
+  return { cardUrl: url, cardId, startPrice, startTime, bidTimeoutMinutes };
 }
 
 export async function createAuction(
@@ -119,6 +130,7 @@ export async function createAuction(
       cardId: card.id,
       startPrice: command.startPrice,
       startTime: command.startTime,
+      bidTimeoutMinutes: command.bidTimeoutMinutes,
       starterTelegramId: starter.telegramId,
       starterTelegramUsername: starter.telegramUsername,
       channelId: auctionChannelId,
@@ -140,6 +152,7 @@ export async function createAuction(
     coverMid: card.coverMid,
     startPrice: command.startPrice,
     startTime: command.startTime,
+    bidTimeoutMinutes: command.bidTimeoutMinutes,
     starterTelegramId: starter.telegramId,
     starterTelegramUsername: starter.telegramUsername,
     channelId: auctionChannelId,

@@ -66,6 +66,7 @@ export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): stri
     "",
     organizerLine,
     `💰 Стартовая ставка: ${details.startPrice ?? 0}`,
+    `⌛ Длительность: ${details.bidTimeoutMinutes} мин`,
     `⏰ Старт: ${formatStartTime(details.startTime)}`,
   ].join("\n");
 }
