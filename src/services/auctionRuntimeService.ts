@@ -1,46 +1,12 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type TelegramBot from "node-telegram-bot-api";
-import {
-  buildAuctionFinishedCaption,
-  buildAuctionLiveCaption,
-  type AuctionViewDetails,
-} from "../handlers/messageBuilders.js";
+import { buildAuctionFinishedCaption, buildAuctionLiveCaption } from "../handlers/messageBuilders.js";
+import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } from "../types/auction.js";
 
-const BID_TIMEOUT_MS = 60 * 60 * 1000;
+// const BID_TIMEOUT_MS = 60 * 60 * 1000;
+const BID_TIMEOUT_MS = 5 * 60 * 1000;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
-
-type AuctionStatusValue = "PENDING" | "ACTIVE" | "ENDED";
-
-type AuctionWithCardAndBids = {
-  id: string;
-  status: AuctionStatusValue;
-  channelId: string;
-  startPrice: number | null;
-  currentPrice: number | null;
-  startTime: Date | null;
-  startedAt: Date | null;
-  createdAt: Date;
-  lastBidAt: Date | null;
-  messageId: number | null;
-  winnerTelegramId: string | null;
-  winnerTelegramUsername: string | null;
-  card: {
-    id: number;
-    cardUrl: string | null;
-    coverMid: string;
-    characterName: string | null;
-    titleMainName: string;
-    titleDir: string;
-    authorUsername: string;
-  };
-  bids: Array<{
-    bidderTelegramId: string;
-    bidderTelegramUsername: string | null;
-    totalPrice: number;
-    createdAt: Date;
-  }>;
-};
 
 function toCoverUrl(coverMid: string): string {
   if (coverMid.startsWith("https://") || coverMid.startsWith("http://")) return coverMid;
@@ -169,7 +135,7 @@ export async function startAuctionIfDue(prisma: PrismaClient, bot: TelegramBot, 
 export async function handleBidCallback(
   prisma: PrismaClient,
   bot: TelegramBot,
-  query: { id: string; data?: string; from: { id: number | string; username?: string } },
+  query: BidCallbackQuery,
 ): Promise<void> {
   const raw = query.data?.trim();
   if (!raw || !raw.startsWith(`${CALLBACK_PREFIX}:`)) return;

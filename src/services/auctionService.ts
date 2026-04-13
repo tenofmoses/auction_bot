@@ -1,38 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-
-type ParsedAuctionCommand = {
-  cardUrl: string;
-  cardId: number;
-  startPrice: number | null;
-  startTime: Date | null;
-};
-
-type CardApiResponse = {
-  cover: { mid: string };
-  character?: { name?: string };
-  author: { id?: number; username: string };
-  title: { main_name: string; dir: string; id: number };
-};
-
-type AuctionStarter = {
-  telegramId: string | null;
-  telegramUsername: string | null;
-};
-
-export type CreatedAuctionDetails = {
-  auctionId: string;
-  characterName: string | null;
-  titleMainName: string;
-  titleDir: string;
-  authorUsername: string;
-  cardUrl: string;
-  coverMid: string;
-  startPrice: number | null;
-  startTime: Date | null;
-  starterTelegramId: string | null;
-  starterTelegramUsername: string | null;
-  channelId: string;
-};
+import type { AuctionStarter, CardApiResponse, CreatedAuctionDetails, ParsedAuctionCommand } from "../types/auction.js";
 
 export function parseAuctionCommand(commandText: string): ParsedAuctionCommand | null {
   const parts = commandText.split(/\s+/);

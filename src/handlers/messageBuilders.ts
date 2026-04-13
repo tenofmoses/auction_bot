@@ -1,18 +1,4 @@
-import type { Bid } from "@prisma/client";
-import type { CreatedAuctionDetails } from "../services/auctionService.js";
-
-export type AuctionViewDetails = {
-  characterName: string | null;
-  titleMainName: string;
-  titleDir: string;
-  authorUsername: string;
-  cardUrl: string;
-  currentPrice: number;
-  winnerTelegramId: string | null;
-  winnerTelegramUsername: string | null;
-  status: "ACTIVE" | "ENDED";
-  lastBids: Pick<Bid, "bidderTelegramId" | "bidderTelegramUsername" | "totalPrice" | "createdAt">[];
-};
+import type { AuctionViewDetails, CreatedAuctionDetails, RecentBid } from "../types/auction.js";
 
 function formatStartTime(startTime: Date | null): string {
   if (!startTime) return "сразу";
@@ -37,10 +23,7 @@ function buildUserLink(telegramId: string | null, telegramUsername: string | nul
   return "неизвестно";
 }
 
-function formatBidLine(
-  bid: Pick<Bid, "bidderTelegramId" | "bidderTelegramUsername" | "totalPrice" | "createdAt">,
-  index: number,
-): string {
+function formatBidLine(bid: RecentBid, index: number): string {
   const bidder = buildUserLink(bid.bidderTelegramId, bid.bidderTelegramUsername);
   return `${index + 1}. ${bidder} — ${bid.totalPrice}`;
 }

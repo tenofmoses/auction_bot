@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import type TelegramBot from "node-telegram-bot-api";
-import type { AppConfig } from "../config.js";
+import type { AppConfig } from "../types/app.js";
 import { createAuction, parseAuctionCommand } from "../services/auctionService.js";
 import { buildAuctionPlannedMessage } from "./messageBuilders.js";
 import { handleBidCallback, startAuctionIfDue } from "../services/auctionRuntimeService.js";
