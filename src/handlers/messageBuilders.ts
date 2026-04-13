@@ -73,6 +73,7 @@ export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): stri
 export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs: number | null = null): string {
   const mangaUrl = `https://remanga.org/manga/${details.titleDir}/main`;
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
+  const organizer = formatUserName(details.starterTelegramId, details.starterTelegramUsername);
   const winner = formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
   const hasBids = details.lastBids.length > 0;
   const lastBidsBlock = hasBids
@@ -86,6 +87,7 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs
     `📚 Манга: <a href="${mangaUrl}">${details.titleMainName}</a>`,
     `✍️ Автор: <a href="${authorUrl}">${details.authorUsername}</a>`,
     `🃏 Карта: <a href="${details.cardUrl}">ссылка</a>`,
+    `👤 Организатор: ${organizer}`,
     "",
     `💸 Текущий выкуп: <b>${details.currentPrice}</b>`,
     `🏆 Лидер: ${hasBids ? winner : "пока нет"}`,

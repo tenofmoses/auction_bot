@@ -44,6 +44,8 @@ export type AuctionViewDetails = {
   titleMainName: string;
   titleDir: string;
   authorUsername: string;
+  starterTelegramId: string | null;
+  starterTelegramUsername: string | null;
   cardUrl: string;
   currentPrice: number;
   winnerTelegramId: string | null;
@@ -59,6 +61,8 @@ export type AuctionWithCardAndBids = {
   status: AuctionStatusValue;
   channelId: string;
   startPrice: number | null;
+  starterTelegramId: string | null;
+  starterTelegramUsername: string | null;
   currentPrice: number | null;
   startTime: Date | null;
   startedAt: Date | null;

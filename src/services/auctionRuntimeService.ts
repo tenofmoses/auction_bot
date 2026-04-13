@@ -37,6 +37,8 @@ function mapAuctionView(auction: AuctionWithCardAndBids): AuctionViewDetails {
     titleMainName: auction.card.titleMainName,
     titleDir: auction.card.titleDir,
     authorUsername: auction.card.authorUsername,
+    starterTelegramId: auction.starterTelegramId,
+    starterTelegramUsername: auction.starterTelegramUsername,
     cardUrl: auction.card.cardUrl ?? `https://remanga.org/card/${auction.card.id}`,
     currentPrice: auction.currentPrice ?? auction.startPrice ?? 0,
     winnerTelegramId: auction.winnerTelegramId,
@@ -204,12 +206,6 @@ export async function handleBidCallback(
   }
 
   const now = new Date();
-  const previousLeader =
-    current.winnerTelegramId && current.winnerTelegramId !== String(query.from.id)
-      ? current.winnerTelegramUsername
-        ? `@${current.winnerTelegramUsername}`
-        : `user_${current.winnerTelegramId}`
-      : null;
   const lastBidTime = current.lastBidAt ?? current.startedAt ?? current.createdAt;
   if (now.getTime() - lastBidTime.getTime() >= BID_TIMEOUT_MS) {
     await finishAuction(prisma, bot, current.id);
@@ -267,8 +263,16 @@ export async function handleBidCallback(
   }
 
   await publishLiveMessage(prisma, bot, updated, previousMessageId);
-  if (previousLeader) {
-    await bot.sendMessage(updated.channelId, `⚠️ ${previousLeader}, вашу ставку перебили.`, {
+  const outbidBidder =
+    updated.bids.length >= 2 &&
+    updated.bids[0].bidderTelegramId !== updated.bids[1].bidderTelegramId
+      ? updated.bids[1]
+      : null;
+  if (outbidBidder) {
+    const outbidUser = outbidBidder.bidderTelegramUsername
+      ? `@${outbidBidder.bidderTelegramUsername}`
+      : `user_${outbidBidder.bidderTelegramId}`;
+    await bot.sendMessage(updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
       message_thread_id: AUCTION_TARGET_THREAD_ID,
     });
   }
