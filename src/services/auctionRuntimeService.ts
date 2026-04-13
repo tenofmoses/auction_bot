@@ -6,6 +6,7 @@ import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } fro
 const AUCTION_TARGET_THREAD_ID = 1273810;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
+const auctionBidQueues = new Map<string, Promise<void>>();
 
 function getRemainingMs(auction: AuctionWithCardAndBids, nowMs: number): number {
   const anchor = auction.lastBidAt ?? auction.startedAt ?? auction.createdAt;
@@ -31,6 +32,24 @@ function buildBidKeyboard(auctionId: string) {
   };
 }
 
+async function runInAuctionQueue(auctionId: string, task: () => Promise<void>): Promise<void> {
+  const previous = auctionBidQueues.get(auctionId) ?? Promise.resolve();
+  const current = previous
+    .catch(() => {
+      // Keep queue alive even if previous task failed.
+    })
+    .then(task);
+
+  auctionBidQueues.set(auctionId, current);
+  try {
+    await current;
+  } finally {
+    if (auctionBidQueues.get(auctionId) === current) {
+      auctionBidQueues.delete(auctionId);
+    }
+  }
+}
+
 function mapAuctionView(auction: AuctionWithCardAndBids): AuctionViewDetails {
   return {
     characterName: auction.card.characterName,
@@ -46,6 +65,18 @@ function mapAuctionView(auction: AuctionWithCardAndBids): AuctionViewDetails {
     status: auction.status === "ENDED" ? "ENDED" : "ACTIVE",
     lastBids: auction.bids,
   };
+}
+
+async function pinAuctionMessage(bot: TelegramBot, chatId: string, messageId: number): Promise<void> {
+  try {
+    await bot.pinChatMessage(chatId, messageId, { disable_notification: true });
+  } catch (error) {
+    console.error("[auction-runtime] Failed to pin auction message", {
+      chatId,
+      messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function sendAuctionMessage(
@@ -105,6 +136,7 @@ async function publishLiveMessage(
     where: { id: auction.id },
     data: { messageId: sent.message_id },
   });
+  await pinAuctionMessage(bot, auction.channelId, sent.message_id);
 }
 
 async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: AuctionWithCardAndBids): Promise<void> {
@@ -192,89 +224,110 @@ export async function handleBidCallback(
     return;
   }
 
-  const current = await prisma.auction.findUnique({
-    where: { id: auctionId },
-    include: {
-      card: true,
-      bids: { orderBy: { createdAt: "desc" }, take: 3 },
-    },
-  });
-
-  if (!current || current.status !== "ACTIVE") {
-    await bot.answerCallbackQuery(query.id, { text: "Аукцион уже не активен", show_alert: true });
-    return;
-  }
-
-  const now = new Date();
-  const outbidUser =
-    current.winnerTelegramId && current.winnerTelegramId !== String(query.from.id)
-      ? current.winnerTelegramUsername
-        ? `@${current.winnerTelegramUsername}`
-        : `user_${current.winnerTelegramId}`
-      : null;
-  const lastBidTime = current.lastBidAt ?? current.startedAt ?? current.createdAt;
-  if (now.getTime() - lastBidTime.getTime() >= current.bidTimeoutMinutes * 60 * 1000) {
-    await finishAuction(prisma, bot, current.id);
-    await bot.answerCallbackQuery(query.id, { text: "Аукцион завершён", show_alert: true });
-    return;
-  }
-
-  const previousMessageId = current.messageId;
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    const latest = await tx.auction.findUnique({
+  await runInAuctionQueue(auctionId, async () => {
+    const current = await prisma.auction.findUnique({
       where: { id: auctionId },
-      select: {
-        status: true,
-        currentPrice: true,
-        startPrice: true,
+      include: {
+        card: true,
+        bids: { orderBy: { createdAt: "desc" }, take: 3 },
       },
     });
-    if (!latest || latest.status !== "ACTIVE") {
-      throw new Error("Auction is not active");
+
+    if (!current || current.status !== "ACTIVE") {
+      await bot.answerCallbackQuery(query.id, { text: "Аукцион уже не активен", show_alert: true });
+      return;
     }
 
-    const newTotal = (latest.currentPrice ?? latest.startPrice ?? 0) + increment;
-    await tx.bid.create({
-      data: {
-        auctionId,
-        increment,
-        totalPrice: newTotal,
-        bidderTelegramId: String(query.from.id),
-        bidderTelegramUsername: query.from.username ?? null,
-      },
+    const now = new Date();
+    const lastBidTime = current.lastBidAt ?? current.startedAt ?? current.createdAt;
+    if (now.getTime() - lastBidTime.getTime() >= current.bidTimeoutMinutes * 60 * 1000) {
+      await finishAuction(prisma, bot, current.id);
+      await bot.answerCallbackQuery(query.id, { text: "Аукцион завершён", show_alert: true });
+      return;
+    }
+
+    const previousMessageId = current.messageId;
+    let outbidUser: string | null = null;
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const latest = await tx.auction.findUnique({
+        where: { id: auctionId },
+        select: {
+          status: true,
+          currentPrice: true,
+          startPrice: true,
+          winnerTelegramId: true,
+          winnerTelegramUsername: true,
+        },
+      });
+      if (!latest || latest.status !== "ACTIVE") {
+        throw new Error("Auction is not active");
+      }
+
+      if (latest.winnerTelegramId && latest.winnerTelegramId !== String(query.from.id)) {
+        outbidUser = latest.winnerTelegramUsername
+          ? `@${latest.winnerTelegramUsername}`
+          : `user_${latest.winnerTelegramId}`;
+      }
+
+      const newTotal = (latest.currentPrice ?? latest.startPrice ?? 0) + increment;
+      await tx.bid.create({
+        data: {
+          auctionId,
+          increment,
+          totalPrice: newTotal,
+          bidderTelegramId: String(query.from.id),
+          bidderTelegramUsername: query.from.username ?? null,
+        },
+      });
+
+      await tx.auction.update({
+        where: { id: auctionId },
+        data: {
+          currentPrice: newTotal,
+          winnerTelegramId: String(query.from.id),
+          winnerTelegramUsername: query.from.username ?? null,
+          lastBidAt: now,
+        },
+      });
     });
 
-    await tx.auction.update({
+    const updated = await prisma.auction.findUnique({
       where: { id: auctionId },
-      data: {
-        currentPrice: newTotal,
-        winnerTelegramId: String(query.from.id),
-        winnerTelegramUsername: query.from.username ?? null,
-        lastBidAt: now,
+      include: {
+        card: true,
+        bids: { orderBy: { createdAt: "desc" }, take: 3 },
       },
     });
+
+    if (!updated) {
+      await bot.answerCallbackQuery(query.id, { text: "Не удалось обновить ставку", show_alert: true });
+      return;
+    }
+
+    try {
+      await publishLiveMessage(prisma, bot, updated, previousMessageId);
+    } catch (error) {
+      console.error("[auction-runtime] Bid saved, but failed to refresh auction message", {
+        auctionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (outbidUser) {
+      try {
+        await bot.sendMessage(updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
+          message_thread_id: AUCTION_TARGET_THREAD_ID,
+        });
+      } catch (error) {
+        console.error("[auction-runtime] Bid saved, but failed to send outbid notification", {
+          auctionId,
+          outbidUser,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    await bot.answerCallbackQuery(query.id, { text: `Ставка +${increment} принята` });
   });
-
-  const updated = await prisma.auction.findUnique({
-    where: { id: auctionId },
-    include: {
-      card: true,
-      bids: { orderBy: { createdAt: "desc" }, take: 3 },
-    },
-  });
-
-  if (!updated) {
-    await bot.answerCallbackQuery(query.id, { text: "Не удалось обновить ставку", show_alert: true });
-    return;
-  }
-
-  await publishLiveMessage(prisma, bot, updated, previousMessageId);
-  if (outbidUser) {
-    await bot.sendMessage(updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
-      message_thread_id: AUCTION_TARGET_THREAD_ID,
-    });
-  }
-  await bot.answerCallbackQuery(query.id, { text: `Ставка +${increment} принята` });
 }
 
 export async function finishAuction(prisma: PrismaClient, bot: TelegramBot, auctionId: string): Promise<void> {

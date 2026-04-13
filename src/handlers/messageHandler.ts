@@ -39,6 +39,17 @@ function targetThreadOptions() {
   return { message_thread_id: AUCTION_TARGET_THREAD_ID };
 }
 
+async function pinAuctionMessage(bot: TelegramBot, messageId: number): Promise<void> {
+  try {
+    await bot.pinChatMessage(AUCTION_TARGET_CHAT_ID, messageId, { disable_notification: true });
+  } catch (error) {
+    console.error("[message] Failed to pin auction message", {
+      messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _cfg: AppConfig): void {
   bot.on("callback_query", async (query) => {
     try {
@@ -49,10 +60,14 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
         from: query.from?.id ?? null,
         error: error instanceof Error ? error.message : String(error),
       });
-      await bot.answerCallbackQuery(query.id, {
-        text: "Не удалось обработать ставку",
-        show_alert: true,
-      });
+      try {
+        await bot.answerCallbackQuery(query.id, {
+          text: "Не удалось обработать ставку",
+          show_alert: true,
+        });
+      } catch {
+        // Ignore callback answer failures (too old/already answered).
+      }
     }
   });
 
@@ -85,7 +100,8 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
 
     const repliedMessageId = msg.reply_to_message?.message_id ?? null;
     const sender = msg.from;
-    if (repliedMessageId && sender?.id) {
+    const isStopCommand = normalizedText?.toLowerCase() === "стоп";
+    if (repliedMessageId && sender?.id && isStopCommand) {
       let replyAuction = await prisma.auction.findFirst({
         where: {
           channelId: AUCTION_TARGET_CHAT_ID,
@@ -99,7 +115,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
         },
       });
 
-      if (!replyAuction && normalizedText?.toLowerCase() === "стоп") {
+      if (!replyAuction) {
         replyAuction = await prisma.auction.findFirst({
           where: {
             channelId: AUCTION_TARGET_CHAT_ID,
@@ -127,26 +143,9 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
           ? organizerId === senderId
           : Boolean(organizerUsername && senderUsername && organizerUsername === senderUsername);
 
-        if (!isOrganizer) {
-          await bot.sendMessage(AUCTION_TARGET_CHAT_ID, "Только организатор может прервать этот аукцион.", targetThreadOptions());
-          return;
-        }
-
-        if (normalizedText?.toLowerCase() !== "стоп") {
-          await bot.sendMessage(
-            AUCTION_TARGET_CHAT_ID,
-            "Чтобы прервать аукцион, ответь на сообщение аукциона словом: стоп",
-            targetThreadOptions(),
-          );
-          return;
-        }
+        if (!isOrganizer) return;
 
         await cancelAuction(prisma, bot, replyAuction.id, sender.username ?? null);
-        return;
-      }
-
-      if (normalizedText?.toLowerCase() === "стоп") {
-        await bot.sendMessage(AUCTION_TARGET_CHAT_ID, "Не нашел активный или запланированный аукцион для остановки.", targetThreadOptions());
         return;
       }
     }
@@ -205,6 +204,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
               where: { id: auctionDetails.auctionId },
               data: { messageId: sent.message_id },
             });
+            await pinAuctionMessage(bot, sent.message_id);
           }
         } catch {
           const sent = await bot.sendMessage(AUCTION_TARGET_CHAT_ID, plannedText, {
@@ -216,6 +216,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
               where: { id: auctionDetails.auctionId },
               data: { messageId: sent.message_id },
             });
+            await pinAuctionMessage(bot, sent.message_id);
           }
         }
         return;

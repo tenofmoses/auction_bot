@@ -62,6 +62,10 @@ declare module 'node-telegram-bot-api' {
     };
   };
 
+  export type PinChatMessageOptions = {
+    disable_notification?: boolean;
+  };
+
   export type BotUser = {
     id: number;
     username?: string;
@@ -82,5 +86,6 @@ declare module 'node-telegram-bot-api' {
     answerCallbackQuery(callbackQueryId: string, options?: { text?: string; show_alert?: boolean }): Promise<boolean>;
     editMessageCaption(caption: string, options: EditMessageOptions): Promise<Message | boolean>;
     editMessageText(text: string, options: EditMessageOptions): Promise<Message | boolean>;
+    pinChatMessage(chatId: number | string, messageId: number, options?: PinChatMessageOptions): Promise<boolean>;
   }
 }
