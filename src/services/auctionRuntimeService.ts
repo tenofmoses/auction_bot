@@ -3,6 +3,7 @@ import type TelegramBot from "node-telegram-bot-api";
 import { buildAuctionFinishedCaption, buildAuctionLiveCaption } from "../handlers/messageBuilders.js";
 import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } from "../types/auction.js";
 
+const AUCTION_TARGET_THREAD_ID = 1273810;
 const BID_TIMEOUT_MS = 60 * 60 * 1000;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
@@ -61,6 +62,7 @@ async function sendAuctionMessage(
     return await bot.sendPhoto(channelId, toCoverUrl(auction.card.coverMid), {
       caption,
       parse_mode: "HTML",
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
       ...replyMarkup,
     });
   } catch (error) {
@@ -70,6 +72,7 @@ async function sendAuctionMessage(
     });
     return await bot.sendMessage(channelId, caption, {
       parse_mode: "HTML",
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
       ...replyMarkup,
     });
   }
@@ -111,6 +114,7 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
     chat_id: auction.channelId,
     message_id: auction.messageId,
     parse_mode: "HTML" as const,
+    message_thread_id: AUCTION_TARGET_THREAD_ID,
     reply_markup: buildBidKeyboard(auction.id),
   };
 
@@ -264,7 +268,9 @@ export async function handleBidCallback(
 
   await publishLiveMessage(prisma, bot, updated, previousMessageId);
   if (previousLeader) {
-    await bot.sendMessage(updated.channelId, `⚠️ ${previousLeader}, вашу ставку перебили.`);
+    await bot.sendMessage(updated.channelId, `⚠️ ${previousLeader}, вашу ставку перебили.`, {
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
+    });
   }
   await bot.answerCallbackQuery(query.id, { text: `Ставка +${increment} принята` });
 }
@@ -358,6 +364,7 @@ export async function cancelAuction(
     await bot.sendPhoto(ended.channelId, toCoverUrl(ended.card.coverMid), {
       caption: cancelText,
       parse_mode: "HTML",
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
     });
   } catch (error) {
     console.error("[auction-runtime] Failed to send canceled auction photo, fallback to text", {
@@ -366,6 +373,7 @@ export async function cancelAuction(
     });
     await bot.sendMessage(ended.channelId, cancelText, {
       disable_web_page_preview: true,
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
     });
   }
 
