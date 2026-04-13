@@ -70,10 +70,26 @@ export async function createAuction(
   auctionChannelId: string,
   starter: AuctionStarter,
 ): Promise<CreatedAuctionDetails> {
+  console.log("[auction] Fetching card data", {
+    cardId: command.cardId,
+    cardUrl: command.cardUrl,
+  });
   const response = await fetch(`https://api.remanga.org/api/inventory/cards/${command.cardId}/`);
-  if (!response.ok) throw new Error("Failed to fetch card data");
+  if (!response.ok) {
+    console.error("[auction] Failed to fetch card data", {
+      cardId: command.cardId,
+      status: response.status,
+      statusText: response.statusText,
+    });
+    throw new Error("Failed to fetch card data");
+  }
 
   const cardData = (await response.json()) as CardApiResponse;
+  console.log("[auction] Card data fetched", {
+    cardId: command.cardId,
+    authorUsername: cardData.author.username,
+    titleDir: cardData.title.dir,
+  });
 
   const card = await prisma.card.upsert({
     where: { id: command.cardId },
@@ -99,6 +115,10 @@ export async function createAuction(
       titleId: cardData.title.id,
     },
   });
+  console.log("[auction] Card upserted", {
+    cardId: card.id,
+    titleDir: card.titleDir,
+  });
 
   await prisma.auction.create({
     data: {
@@ -109,6 +129,11 @@ export async function createAuction(
       starterTelegramUsername: starter.telegramUsername,
       channelId: auctionChannelId,
     },
+  });
+  console.log("[auction] Auction record created", {
+    cardId: card.id,
+    channelId: auctionChannelId,
+    starterTelegramId: starter.telegramId,
   });
 
   return {

@@ -1,4 +1,4 @@
-import type { CreatedAuctionDetails } from "../services/auctionService.ts";
+import type { CreatedAuctionDetails } from "../services/auctionService.js";
 
 function formatStartTime(startTime: Date | null): string {
   if (!startTime) return "сразу";
