@@ -10,6 +10,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AuctionStatus {
+  PENDING
+  ACTIVE
+  ENDED
+}
+
 model Card {
   id             Int      @id
   cardUrl        String?
@@ -29,10 +35,33 @@ model Auction {
   cardId     Int      @unique
   startPrice Int?
   startTime  DateTime?
+  status     AuctionStatus @default(PENDING)
+  startedAt  DateTime?
+  endedAt    DateTime?
+  lastBidAt  DateTime?
+  messageId  Int?
+  currentPrice Int?
+  winnerTelegramId       String?
+  winnerTelegramUsername String?
   starterTelegramId       String?
   starterTelegramUsername String?
   channelId  String
   createdAt  DateTime @default(now())
 
   card Card @relation(fields: [cardId], references: [id])
+  bids Bid[]
+}
+
+model Bid {
+  id                     String   @id @default(cuid())
+  auctionId              String
+  increment              Int
+  totalPrice             Int
+  bidderTelegramId       String
+  bidderTelegramUsername String?
+  createdAt              DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@index([auctionId, createdAt(sort: Desc)])
 }

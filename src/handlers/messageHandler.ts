@@ -3,8 +3,25 @@ import type TelegramBot from "node-telegram-bot-api";
 import type { AppConfig } from "../config.js";
 import { createAuction, parseAuctionCommand } from "../services/auctionService.js";
 import { buildAuctionPlannedMessage } from "./messageBuilders.js";
+import { handleBidCallback, startAuctionIfDue } from "../services/auctionRuntimeService.js";
 
 export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, cfg: AppConfig): void {
+  bot.on("callback_query", async (query) => {
+    try {
+      await handleBidCallback(prisma, bot, query);
+    } catch (error) {
+      console.error("[callback] Failed to process bid callback", {
+        data: query.data ?? null,
+        from: query.from?.id ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await bot.answerCallbackQuery(query.id, {
+        text: "Не удалось обработать ставку",
+        show_alert: true,
+      });
+    }
+  });
+
   bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const chatType = msg.chat.type;
@@ -83,13 +100,27 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, c
         telegramUsername: msg.from?.username ?? null,
       });
       console.log("[message] Auction created successfully", {
+        auctionId: auctionDetails.auctionId,
         chatId,
         cardUrl: auctionDetails.cardUrl,
         titleDir: auctionDetails.titleDir,
       });
-      await bot.sendMessage(chatId, buildAuctionPlannedMessage(auctionDetails), {
-        parse_mode: "HTML",
-      });
+
+      const isFutureStart = Boolean(
+        auctionDetails.startTime && auctionDetails.startTime.getTime() > Date.now(),
+      );
+
+      if (isFutureStart) {
+        await bot.sendMessage(chatId, buildAuctionPlannedMessage(auctionDetails), {
+          parse_mode: "HTML",
+        });
+        return;
+      }
+
+      await startAuctionIfDue(prisma, bot, auctionDetails.auctionId);
+      if (isPrivateChat) {
+        await bot.sendMessage(chatId, "Аукцион запущен и опубликован в канале.");
+      }
     } catch (error) {
       console.error("[message] Failed to create auction", {
         chatId,

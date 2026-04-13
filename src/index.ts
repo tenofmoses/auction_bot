@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import TelegramBot from 'node-telegram-bot-api';
 import { config } from './config.js';
 import { registerMessageHandler } from './handlers/messageHandler.js';
+import { initAuctionRuntime } from './services/auctionRuntimeService.js';
 
 const prisma = new PrismaClient({
   datasources: {
@@ -36,6 +37,7 @@ void bot
   });
 
 registerMessageHandler(bot, prisma, config);
+initAuctionRuntime(prisma, bot);
 
 console.log('[bot] Bot is running...', {
   auctionChannelId: config.AUCTION_CHANNEL_ID,

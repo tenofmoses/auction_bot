@@ -20,15 +20,18 @@ type AuctionStarter = {
 };
 
 export type CreatedAuctionDetails = {
+  auctionId: string;
   characterName: string | null;
   titleMainName: string;
   titleDir: string;
   authorUsername: string;
   cardUrl: string;
+  coverMid: string;
   startPrice: number | null;
   startTime: Date | null;
   starterTelegramId: string | null;
   starterTelegramUsername: string | null;
+  channelId: string;
 };
 
 export function parseAuctionCommand(commandText: string): ParsedAuctionCommand | null {
@@ -120,7 +123,7 @@ export async function createAuction(
     titleDir: card.titleDir,
   });
 
-  await prisma.auction.create({
+  const auction = await prisma.auction.create({
     data: {
       cardId: card.id,
       startPrice: command.startPrice,
@@ -137,14 +140,17 @@ export async function createAuction(
   });
 
   return {
+    auctionId: auction.id,
     characterName: card.characterName,
     titleMainName: card.titleMainName,
     titleDir: card.titleDir,
     authorUsername: card.authorUsername,
     cardUrl: command.cardUrl,
+    coverMid: card.coverMid,
     startPrice: command.startPrice,
     startTime: command.startTime,
     starterTelegramId: starter.telegramId,
     starterTelegramUsername: starter.telegramUsername,
+    channelId: auctionChannelId,
   };
 }
