@@ -28,6 +28,21 @@ function formatBidLine(bid: RecentBid, index: number): string {
   return `${index + 1}. ${bidder} — ${bid.totalPrice}`;
 }
 
+function formatTimeSinceLastBid(lastBidAt: Date | null): string {
+  if (!lastBidAt) return "нет ставок";
+  const diffMs = Date.now() - lastBidAt.getTime();
+  if (diffMs <= 0) return "только что";
+
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours} ч ${minutes} мин назад`;
+  if (minutes > 0) return `${minutes} мин ${seconds} сек назад`;
+  return `${seconds} сек назад`;
+}
+
 export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): string {
   const mangaUrl = `https://remanga.org/manga/${details.titleDir}/main`;
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
@@ -63,6 +78,7 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails): string {
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
   const winner = buildUserLink(details.winnerTelegramId, details.winnerTelegramUsername);
   const hasBids = details.lastBids.length > 0;
+  const lastBidAt = hasBids ? details.lastBids[0].createdAt : null;
   const lastBidsBlock = hasBids
     ? details.lastBids.map((bid, index) => formatBidLine(bid, index)).join("\n")
     : "Ставок пока нет";
@@ -77,6 +93,7 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails): string {
     "",
     `💸 Текущий выкуп: <b>${details.currentPrice}</b>`,
     `🏆 Лидер: ${hasBids ? winner : "пока нет"}`,
+    `⏱ С последней ставки: ${formatTimeSinceLastBid(lastBidAt)}`,
     "",
     "📝 Последние 3 ставки:",
     lastBidsBlock,
