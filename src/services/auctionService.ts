@@ -92,6 +92,7 @@ export async function createAuction(
   const cardData = (await response.json()) as CardApiResponse;
   const coverMid = cardData.cover?.mid ?? "https://remanga.org/favicon.ico";
   const authorUsername = cardData.author?.username ?? "unknown_author";
+  const authorId = cardData.author?.id ?? null;
   const titleMainName = cardData.title?.main_name ?? "Не указано";
   const titleDir = cardData.title?.dir ?? "unknown";
   const titleId = cardData.title?.id ?? 0;
@@ -110,7 +111,7 @@ export async function createAuction(
       cardUrl: command.cardUrl,
       coverMid,
       characterName: cardData.character?.name ?? null,
-      authorId: cardData.author.id ?? null,
+      authorId,
       authorUsername,
       titleMainName,
       titleDir,
@@ -121,7 +122,7 @@ export async function createAuction(
       cardUrl: command.cardUrl,
       coverMid,
       characterName: cardData.character?.name ?? null,
-      authorId: cardData.author.id ?? null,
+      authorId,
       authorUsername,
       titleMainName,
       titleDir,

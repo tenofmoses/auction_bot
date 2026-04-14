@@ -244,19 +244,34 @@ export async function startAuctionIfDue(prisma: PrismaClient, bot: TelegramBot, 
 
   const now = new Date();
   const startPrice = auction.startPrice ?? 0;
-  const updated = await prisma.auction.update({
-    where: { id: auction.id },
+
+  const activated = await prisma.auction.updateMany({
+    where: {
+      id: auction.id,
+      status: "PENDING",
+      OR: [{ startTime: null }, { startTime: { lte: now } }],
+    },
     data: {
       status: "ACTIVE",
       startedAt: now,
       lastBidAt: now,
       currentPrice: startPrice,
     },
+  });
+
+  if (activated.count === 0) {
+    return;
+  }
+
+  const updated = await prisma.auction.findUnique({
+    where: { id: auction.id },
     include: {
       card: true,
       bids: { orderBy: { createdAt: "desc" }, take: 3 },
     },
   });
+
+  if (!updated) return;
 
   await publishLiveMessage(prisma, bot, updated);
   console.log("[auction-runtime] Auction started", {
