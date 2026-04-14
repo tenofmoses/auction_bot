@@ -7,6 +7,7 @@ const AUCTION_TARGET_THREAD_ID = 1273810;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
 const auctionBidQueues = new Map<string, Promise<void>>();
+const auctionEditBlockedUntil = new Map<string, number>();
 
 function getRemainingMs(auction: AuctionWithCardAndBids, nowMs: number): number {
   const anchor = auction.lastBidAt ?? auction.startedAt ?? auction.createdAt;
@@ -48,6 +49,14 @@ async function runInAuctionQueue(auctionId: string, task: () => Promise<void>): 
       auctionBidQueues.delete(auctionId);
     }
   }
+}
+
+function parseRetryAfterMs(errorText: string): number | null {
+  const match = errorText.match(/retry after\s+(\d+)/i);
+  if (!match) return null;
+  const seconds = Number(match[1]);
+  if (Number.isNaN(seconds) || seconds <= 0) return null;
+  return seconds * 1000;
 }
 
 function mapAuctionView(auction: AuctionWithCardAndBids): AuctionViewDetails {
@@ -162,8 +171,13 @@ async function publishLiveMessage(
   await pinAuctionMessage(bot, auction.channelId, sent.message_id);
 }
 
-async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: AuctionWithCardAndBids): Promise<boolean> {
-  if (!auction.messageId || auction.status !== "ACTIVE") return false;
+async function refreshAuctionMessageCountdown(
+  bot: TelegramBot,
+  auction: AuctionWithCardAndBids,
+): Promise<{ messageMissing: boolean; retryAfterMs: number | null }> {
+  if (!auction.messageId || auction.status !== "ACTIVE") {
+    return { messageMissing: false, retryAfterMs: null };
+  }
 
   const remainingMs = getRemainingMs(auction, Date.now());
   const caption = buildAuctionLiveCaption(mapAuctionView(auction), remainingMs);
@@ -177,11 +191,13 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
 
   try {
     await bot.editMessageCaption(caption, editOptions);
-    return false;
+    return { messageMissing: false, retryAfterMs: null };
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
-    if (err.includes("message to edit not found")) return true;
-    if (err.includes("message is not modified")) return false;
+    const retryAfterMs = parseRetryAfterMs(err);
+    if (retryAfterMs) return { messageMissing: false, retryAfterMs };
+    if (err.includes("message to edit not found")) return { messageMissing: true, retryAfterMs: null };
+    if (err.includes("message is not modified")) return { messageMissing: false, retryAfterMs: null };
     // Try text edit only when Telegram explicitly says caption edit is impossible for this message type.
     if (!err.toLowerCase().includes("caption")) {
       console.error("[auction-runtime] Failed to refresh auction caption", {
@@ -189,24 +205,28 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
         messageId: auction.messageId,
         error: err,
       });
-      return false;
+      return { messageMissing: false, retryAfterMs: null };
     }
   }
 
   try {
     await bot.editMessageText(caption, editOptions);
-    return false;
+    return { messageMissing: false, retryAfterMs: null };
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
-    if (err.includes("message to edit not found")) return true;
-    if (err.includes("message is not modified")) return false;
-    if (err.toLowerCase().includes("there is no text in the message to edit")) return false;
+    const retryAfterMs = parseRetryAfterMs(err);
+    if (retryAfterMs) return { messageMissing: false, retryAfterMs };
+    if (err.includes("message to edit not found")) return { messageMissing: true, retryAfterMs: null };
+    if (err.includes("message is not modified")) return { messageMissing: false, retryAfterMs: null };
+    if (err.toLowerCase().includes("there is no text in the message to edit")) {
+      return { messageMissing: false, retryAfterMs: null };
+    }
     console.error("[auction-runtime] Failed to refresh auction countdown", {
       auctionId: auction.id,
       messageId: auction.messageId,
       error: err,
     });
-    return false;
+    return { messageMissing: false, retryAfterMs: null };
   }
 }
 
@@ -525,6 +545,9 @@ async function refreshActiveAuctionCountdowns(prisma: PrismaClient, bot: Telegra
   });
 
   for (const auction of activeAuctions) {
+    const blockedUntil = auctionEditBlockedUntil.get(auction.id) ?? 0;
+    if (Date.now() < blockedUntil) continue;
+
     const remainingMs = getRemainingMs(auction, Date.now());
     if (remainingMs <= 0) {
       await finishAuction(prisma, bot, auction.id);
@@ -536,8 +559,13 @@ async function refreshActiveAuctionCountdowns(prisma: PrismaClient, bot: Telegra
       continue;
     }
 
-    const messageMissing = await refreshAuctionMessageCountdown(bot, auction);
-    if (messageMissing) {
+    const refreshResult = await refreshAuctionMessageCountdown(bot, auction);
+    if (refreshResult.retryAfterMs) {
+      auctionEditBlockedUntil.set(auction.id, Date.now() + refreshResult.retryAfterMs);
+      continue;
+    }
+
+    if (refreshResult.messageMissing) {
       const reset = await prisma.auction.update({
         where: { id: auction.id },
         data: { messageId: null },
@@ -572,5 +600,5 @@ export function initAuctionRuntime(prisma: PrismaClient, bot: TelegramBot): void
   void tick();
   setInterval(() => {
     void tick();
-  }, 1_000);
+  }, 3_000);
 }
