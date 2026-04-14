@@ -115,16 +115,39 @@ async function publishLiveMessage(
   prisma: PrismaClient,
   bot: TelegramBot,
   auction: AuctionWithCardAndBids,
-  deleteMessageId: number | null,
 ) {
-  if (deleteMessageId) {
+  if (auction.messageId) {
+    const remainingMs = getRemainingMs(auction, Date.now());
+    const caption = buildAuctionLiveCaption(mapAuctionView(auction), remainingMs);
+    const editOptions = {
+      chat_id: auction.channelId,
+      message_id: auction.messageId,
+      parse_mode: "HTML" as const,
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
+      reply_markup: buildBidKeyboard(auction.id),
+    };
+
     try {
-      await bot.deleteMessage(auction.channelId, deleteMessageId);
+      await bot.editMessageCaption(caption, editOptions);
+      await pinAuctionMessage(bot, auction.channelId, auction.messageId);
+      return;
     } catch (error) {
-      console.error("[auction-runtime] Failed to delete previous message", {
+      const err = error instanceof Error ? error.message : String(error);
+      if (err.includes("message is not modified")) return;
+      // Could be text-only message or deleted message.
+    }
+
+    try {
+      await bot.editMessageText(caption, editOptions);
+      await pinAuctionMessage(bot, auction.channelId, auction.messageId);
+      return;
+    } catch (error) {
+      const err = error instanceof Error ? error.message : String(error);
+      if (err.includes("message is not modified")) return;
+      console.error("[auction-runtime] Failed to edit current auction message, creating new one", {
         auctionId: auction.id,
-        messageId: deleteMessageId,
-        error: error instanceof Error ? error.message : String(error),
+        messageId: auction.messageId,
+        error: err,
       });
     }
   }
@@ -202,7 +225,7 @@ export async function startAuctionIfDue(prisma: PrismaClient, bot: TelegramBot, 
     },
   });
 
-  await publishLiveMessage(prisma, bot, updated, updated.messageId);
+  await publishLiveMessage(prisma, bot, updated);
   console.log("[auction-runtime] Auction started", {
     auctionId: updated.id,
     channelId: updated.channelId,
@@ -246,7 +269,6 @@ export async function handleBidCallback(
       return;
     }
 
-    const previousMessageId = current.messageId;
     let outbidUser: string | null = null;
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const latest = await tx.auction.findUnique({
@@ -305,7 +327,7 @@ export async function handleBidCallback(
     }
 
     try {
-      await publishLiveMessage(prisma, bot, updated, previousMessageId);
+      await publishLiveMessage(prisma, bot, updated);
     } catch (error) {
       console.error("[auction-runtime] Bid saved, but failed to refresh auction message", {
         auctionId,
