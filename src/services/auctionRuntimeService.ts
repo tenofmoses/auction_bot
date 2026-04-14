@@ -182,7 +182,15 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
     const err = error instanceof Error ? error.message : String(error);
     if (err.includes("message to edit not found")) return true;
     if (err.includes("message is not modified")) return false;
-    // Could be text-only message after fallback.
+    // Try text edit only when Telegram explicitly says caption edit is impossible for this message type.
+    if (!err.toLowerCase().includes("caption")) {
+      console.error("[auction-runtime] Failed to refresh auction caption", {
+        auctionId: auction.id,
+        messageId: auction.messageId,
+        error: err,
+      });
+      return false;
+    }
   }
 
   try {
@@ -192,6 +200,7 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
     const err = error instanceof Error ? error.message : String(error);
     if (err.includes("message to edit not found")) return true;
     if (err.includes("message is not modified")) return false;
+    if (err.toLowerCase().includes("there is no text in the message to edit")) return false;
     console.error("[auction-runtime] Failed to refresh auction countdown", {
       auctionId: auction.id,
       messageId: auction.messageId,
