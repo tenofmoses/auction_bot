@@ -517,6 +517,12 @@ async function refreshActiveAuctionCountdowns(prisma: PrismaClient, bot: Telegra
       await finishAuction(prisma, bot, auction.id);
       continue;
     }
+
+    if (!auction.messageId) {
+      await publishLiveMessage(prisma, bot, auction);
+      continue;
+    }
+
     await refreshAuctionMessageCountdown(bot, auction);
   }
 }
