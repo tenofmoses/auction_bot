@@ -100,10 +100,21 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs
 }
 
 export function buildAuctionFinishedCaption(details: AuctionViewDetails): string {
-  const winner = formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
+  const organizerPlain = formatUserName(details.starterTelegramId, details.starterTelegramUsername);
+  const organizerTag = details.starterTelegramUsername
+    ? `@${details.starterTelegramUsername}`
+    : organizerPlain;
+  const winnerTag = details.winnerTelegramUsername
+    ? `@${details.winnerTelegramUsername}`
+    : formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
+  const liveCaption = buildAuctionLiveCaption({ ...details, status: "ENDED" });
+  const liveCaptionWithTaggedOrganizer = liveCaption.replace(
+    `👤 Организатор: ${organizerPlain}`,
+    `👤 Организатор: ${organizerTag}`,
+  );
   return [
-    buildAuctionLiveCaption({ ...details, status: "ENDED" }),
+    liveCaptionWithTaggedOrganizer,
     "",
-    `✅ Победитель: ${details.lastBids.length > 0 ? winner : "нет ставок"}`,
+    `✅ Победитель: ${details.lastBids.length > 0 ? winnerTag : "нет ставок"}`,
   ].join("\n");
 }
