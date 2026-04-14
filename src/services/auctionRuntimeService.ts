@@ -162,8 +162,8 @@ async function publishLiveMessage(
   await pinAuctionMessage(bot, auction.channelId, sent.message_id);
 }
 
-async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: AuctionWithCardAndBids): Promise<void> {
-  if (!auction.messageId || auction.status !== "ACTIVE") return;
+async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: AuctionWithCardAndBids): Promise<boolean> {
+  if (!auction.messageId || auction.status !== "ACTIVE") return false;
 
   const remainingMs = getRemainingMs(auction, Date.now());
   const caption = buildAuctionLiveCaption(mapAuctionView(auction), remainingMs);
@@ -177,23 +177,27 @@ async function refreshAuctionMessageCountdown(bot: TelegramBot, auction: Auction
 
   try {
     await bot.editMessageCaption(caption, editOptions);
-    return;
+    return false;
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
-    if (err.includes("message is not modified")) return;
+    if (err.includes("message to edit not found")) return true;
+    if (err.includes("message is not modified")) return false;
     // Could be text-only message after fallback.
   }
 
   try {
     await bot.editMessageText(caption, editOptions);
+    return false;
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
-    if (err.includes("message is not modified")) return;
+    if (err.includes("message to edit not found")) return true;
+    if (err.includes("message is not modified")) return false;
     console.error("[auction-runtime] Failed to refresh auction countdown", {
       auctionId: auction.id,
       messageId: auction.messageId,
       error: err,
     });
+    return false;
   }
 }
 
@@ -523,7 +527,18 @@ async function refreshActiveAuctionCountdowns(prisma: PrismaClient, bot: Telegra
       continue;
     }
 
-    await refreshAuctionMessageCountdown(bot, auction);
+    const messageMissing = await refreshAuctionMessageCountdown(bot, auction);
+    if (messageMissing) {
+      const reset = await prisma.auction.update({
+        where: { id: auction.id },
+        data: { messageId: null },
+        include: {
+          card: true,
+          bids: { orderBy: { createdAt: "desc" }, take: 3 },
+        },
+      });
+      await publishLiveMessage(prisma, bot, reset);
+    }
   }
 }
 
