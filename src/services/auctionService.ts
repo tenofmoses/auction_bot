@@ -90,34 +90,42 @@ export async function createAuction(
   }
 
   const cardData = (await response.json()) as CardApiResponse;
+  const coverMid = cardData.cover?.mid ?? "https://remanga.org/favicon.ico";
+  const authorUsername = cardData.author?.username ?? "unknown_author";
+  const titleMainName = cardData.title?.main_name ?? "Не указано";
+  const titleDir = cardData.title?.dir ?? "unknown";
+  const titleId = cardData.title?.id ?? 0;
+
   console.log("[auction] Card data fetched", {
     cardId: command.cardId,
-    authorUsername: cardData.author.username,
-    titleDir: cardData.title.dir,
+    authorUsername,
+    titleDir,
+    hasIncompleteFields:
+      !cardData.cover?.mid || !cardData.author?.username || !cardData.title?.main_name || !cardData.title?.dir,
   });
 
   const card = await prisma.card.upsert({
     where: { id: command.cardId },
     update: {
       cardUrl: command.cardUrl,
-      coverMid: cardData.cover.mid,
+      coverMid,
       characterName: cardData.character?.name ?? null,
       authorId: cardData.author.id ?? null,
-      authorUsername: cardData.author.username,
-      titleMainName: cardData.title.main_name,
-      titleDir: cardData.title.dir,
-      titleId: cardData.title.id,
+      authorUsername,
+      titleMainName,
+      titleDir,
+      titleId,
     },
     create: {
       id: command.cardId,
       cardUrl: command.cardUrl,
-      coverMid: cardData.cover.mid,
+      coverMid,
       characterName: cardData.character?.name ?? null,
       authorId: cardData.author.id ?? null,
-      authorUsername: cardData.author.username,
-      titleMainName: cardData.title.main_name,
-      titleDir: cardData.title.dir,
-      titleId: cardData.title.id,
+      authorUsername,
+      titleMainName,
+      titleDir,
+      titleId,
     },
   });
   console.log("[auction] Card upserted", {

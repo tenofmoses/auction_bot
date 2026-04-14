@@ -7,10 +7,10 @@ export type ParsedAuctionCommand = {
 };
 
 export type CardApiResponse = {
-  cover: { mid: string };
+  cover?: { mid?: string } | null;
   character?: { name?: string };
-  author: { id?: number; username: string };
-  title: { main_name: string; dir: string; id: number };
+  author?: { id?: number; username?: string } | null;
+  title?: { main_name?: string; dir?: string; id?: number } | null;
 };
 
 export type AuctionStarter = {

@@ -43,6 +43,9 @@ function formatTimeLeft(remainingMs: number): string {
 export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): string {
   const mangaUrl = `https://remanga.org/manga/${details.titleDir}/main`;
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
+  const hasManga = details.titleDir !== "unknown" && details.titleMainName !== "Не указано";
+  const hasAuthor = details.authorUsername !== "unknown_author";
+  const hasCharacter = Boolean(details.characterName);
   const organizerText = details.starterTelegramUsername
     ? `@${details.starterTelegramUsername}`
     : "организатор";
@@ -59,21 +62,26 @@ export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): stri
   return [
     "🔔 <b>Аукцион запланирован</b>",
     "",
-    `🧙 Персонаж: ${details.characterName ?? "не указан"}`,
-    `📚 Манга: <a href="${mangaUrl}">${details.titleMainName}</a>`,
-    `✍️ Автор: <a href="${authorUrl}">${details.authorUsername}</a>`,
+    hasCharacter ? `🧙 Персонаж: ${details.characterName}` : null,
+    hasManga ? `📚 Манга: <a href="${mangaUrl}">${details.titleMainName}</a>` : null,
+    hasAuthor ? `✍️ Автор: <a href="${authorUrl}">${details.authorUsername}</a>` : null,
     `🃏 Карта: <a href="${details.cardUrl}">ссылка</a>`,
     "",
     organizerLine,
     `💰 Стартовая ставка: ${details.startPrice ?? 0}`,
     `⌛ Длительность: ${details.bidTimeoutMinutes} мин`,
     `⏰ Старт: ${formatStartTime(details.startTime)}`,
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 }
 
 export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs: number | null = null): string {
   const mangaUrl = `https://remanga.org/manga/${details.titleDir}/main`;
   const authorUrl = `https://remanga.org/user/${details.authorUsername}/about`;
+  const hasManga = details.titleDir !== "unknown" && details.titleMainName !== "Не указано";
+  const hasAuthor = details.authorUsername !== "unknown_author";
+  const hasCharacter = Boolean(details.characterName);
   const organizer = formatUserName(details.starterTelegramId, details.starterTelegramUsername);
   const winner = formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
   const hasBids = details.lastBids.length > 0;
@@ -84,9 +92,9 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs
   return [
     `🔥 <b>Аукцион ${details.status === "ENDED" ? "завершён" : "идёт"}</b>`,
     "",
-    `🧙 Персонаж: ${details.characterName ?? "не указан"}`,
-    `📚 Манга: <a href="${mangaUrl}">${details.titleMainName}</a>`,
-    `✍️ Автор: <a href="${authorUrl}">${details.authorUsername}</a>`,
+    hasCharacter ? `🧙 Персонаж: ${details.characterName}` : null,
+    hasManga ? `📚 Манга: <a href="${mangaUrl}">${details.titleMainName}</a>` : null,
+    hasAuthor ? `✍️ Автор: <a href="${authorUrl}">${details.authorUsername}</a>` : null,
     `🃏 Карта: <a href="${details.cardUrl}">ссылка</a>`,
     `👤 Организатор: ${organizer}`,
     "",
@@ -96,7 +104,9 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs
     "",
     "📝 Последние 3 ставки:",
     lastBidsBlock,
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 }
 
 export function buildAuctionFinishedCaption(details: AuctionViewDetails): string {
