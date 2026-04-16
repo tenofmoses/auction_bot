@@ -89,6 +89,9 @@ export type AuctionWithCardAndBids = {
 export type BidCallbackQuery = {
   id: string;
   data?: string;
+  message?: {
+    message_id?: number;
+  };
   from: {
     id: number | string;
     username?: string;

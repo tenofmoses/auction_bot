@@ -4,6 +4,7 @@ import type { AppConfig } from "../types/app.js";
 import { createAuction, parseAuctionCommand } from "../services/auctionService.js";
 import { buildAuctionPlannedMessage } from "./messageBuilders.js";
 import { cancelAuction, handleBidCallback, startAuctionIfDue } from "../services/auctionRuntimeService.js";
+import { sendMessageWithRetry, sendPhotoWithRetry } from "../services/telegramDeliveryService.js";
 
 const AUCTION_TARGET_CHAT_ID = "-1002265261405";
 const AUCTION_TARGET_THREAD_ID = 1273810;
@@ -151,8 +152,9 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     }
 
     if (normalizedText?.toLowerCase() === "/start" || normalizedText?.toLowerCase() === "/help" || normalizedText?.toLowerCase() === "аукцион") {
-      await bot.sendMessage(AUCTION_TARGET_CHAT_ID, buildAuctionRulesMessage(), {
+      await sendMessageWithRetry(bot, AUCTION_TARGET_CHAT_ID, buildAuctionRulesMessage(), {
         parse_mode: "HTML",
+        sourceMessageId: msg.message_id ?? null,
         ...targetThreadOptions(),
       });
       return;
@@ -168,10 +170,14 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
 
     const command = parseAuctionCommand(normalizedText);
     if (!command) {
-      await bot.sendMessage(
+      await sendMessageWithRetry(
+        bot,
         AUCTION_TARGET_CHAT_ID,
         "Не удалось разобрать команду.\nФормат: аукцион https://remanga.org/card/145851 [цена|время]",
-        targetThreadOptions(),
+        {
+          sourceMessageId: msg.message_id ?? null,
+          ...targetThreadOptions(),
+        },
       );
       return;
     }
@@ -194,9 +200,10 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
       if (isFutureStart) {
         const plannedText = buildAuctionPlannedMessage(auctionDetails);
         try {
-          const sent = await bot.sendPhoto(AUCTION_TARGET_CHAT_ID, toCoverUrl(auctionDetails.coverMid), {
+          const sent = await sendPhotoWithRetry(bot, AUCTION_TARGET_CHAT_ID, toCoverUrl(auctionDetails.coverMid), {
             caption: plannedText,
             parse_mode: "HTML",
+            sourceMessageId: msg.message_id ?? null,
             ...targetThreadOptions(),
           });
           if (sent.message_id) {
@@ -207,8 +214,9 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
             await pinAuctionMessage(bot, sent.message_id);
           }
         } catch {
-          const sent = await bot.sendMessage(AUCTION_TARGET_CHAT_ID, plannedText, {
+          const sent = await sendMessageWithRetry(bot, AUCTION_TARGET_CHAT_ID, plannedText, {
             parse_mode: "HTML",
+            sourceMessageId: msg.message_id ?? null,
             ...targetThreadOptions(),
           });
           if (sent.message_id) {
@@ -231,7 +239,10 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
         error: errorMessage,
       });
 
-      await bot.sendMessage(AUCTION_TARGET_CHAT_ID, "Ошибка при создании аукциона", targetThreadOptions());
+      await sendMessageWithRetry(bot, AUCTION_TARGET_CHAT_ID, "Ошибка при создании аукциона", {
+        sourceMessageId: msg.message_id ?? null,
+        ...targetThreadOptions(),
+      });
     }
   });
 }

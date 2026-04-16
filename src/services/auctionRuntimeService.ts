@@ -1,12 +1,13 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type TelegramBot from "node-telegram-bot-api";
 import { buildAuctionFinishedCaption, buildAuctionLiveCaption } from "../handlers/messageBuilders.js";
+import { sendMessageWithRetry, sendPhotoWithRetry } from "./telegramDeliveryService.js";
 import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } from "../types/auction.js";
 
 const AUCTION_TARGET_THREAD_ID = 1273810;
 const BID_INCREMENTS = [50, 100, 500, 1000] as const;
 const CALLBACK_PREFIX = "auction_bid";
-const auctionBidQueues = new Map<string, Promise<void>>();
+const auctionTaskQueues = new Map<string, Promise<void>>();
 const auctionEditBlockedUntil = new Map<string, number>();
 
 function getRemainingMs(auction: AuctionWithCardAndBids, nowMs: number): number {
@@ -34,19 +35,19 @@ function buildBidKeyboard(auctionId: string) {
 }
 
 async function runInAuctionQueue(auctionId: string, task: () => Promise<void>): Promise<void> {
-  const previous = auctionBidQueues.get(auctionId) ?? Promise.resolve();
+  const previous = auctionTaskQueues.get(auctionId) ?? Promise.resolve();
   const current = previous
     .catch(() => {
       // Keep queue alive even if previous task failed.
     })
     .then(task);
 
-  auctionBidQueues.set(auctionId, current);
+  auctionTaskQueues.set(auctionId, current);
   try {
     await current;
   } finally {
-    if (auctionBidQueues.get(auctionId) === current) {
-      auctionBidQueues.delete(auctionId);
+    if (auctionTaskQueues.get(auctionId) === current) {
+      auctionTaskQueues.delete(auctionId);
     }
   }
 }
@@ -101,7 +102,7 @@ async function sendAuctionMessage(
   const replyMarkup = withButtons ? { reply_markup: buildBidKeyboard(auction.id) } : undefined;
 
   try {
-    return await bot.sendPhoto(channelId, toCoverUrl(auction.card.coverMid), {
+    return await sendPhotoWithRetry(bot, channelId, toCoverUrl(auction.card.coverMid), {
       caption,
       parse_mode: "HTML",
       message_thread_id: AUCTION_TARGET_THREAD_ID,
@@ -112,7 +113,7 @@ async function sendAuctionMessage(
       auctionId: auction.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    return await bot.sendMessage(channelId, caption, {
+    return await sendMessageWithRetry(bot, channelId, caption, {
       parse_mode: "HTML",
       message_thread_id: AUCTION_TARGET_THREAD_ID,
       ...replyMarkup,
@@ -136,6 +137,7 @@ async function publishLiveMessage(
       reply_markup: buildBidKeyboard(auction.id),
     };
 
+    let shouldCreateNew = false;
     try {
       await bot.editMessageCaption(caption, editOptions);
       await pinAuctionMessage(bot, auction.channelId, auction.messageId);
@@ -143,7 +145,14 @@ async function publishLiveMessage(
     } catch (error) {
       const err = error instanceof Error ? error.message : String(error);
       if (err.includes("message is not modified")) return;
-      // Could be text-only message or deleted message.
+      const retryAfterMs = parseRetryAfterMs(err);
+      if (retryAfterMs) {
+        auctionEditBlockedUntil.set(auction.id, Date.now() + retryAfterMs);
+        return;
+      }
+      if (err.includes("message to edit not found")) {
+        shouldCreateNew = true;
+      }
     }
 
     try {
@@ -153,12 +162,33 @@ async function publishLiveMessage(
     } catch (error) {
       const err = error instanceof Error ? error.message : String(error);
       if (err.includes("message is not modified")) return;
-      console.error("[auction-runtime] Failed to edit current auction message, creating new one", {
-        auctionId: auction.id,
-        messageId: auction.messageId,
-        error: err,
-      });
+      const retryAfterMs = parseRetryAfterMs(err);
+      if (retryAfterMs) {
+        auctionEditBlockedUntil.set(auction.id, Date.now() + retryAfterMs);
+        return;
+      }
+      if (err.includes("message to edit not found")) {
+        shouldCreateNew = true;
+      } else if (err.toLowerCase().includes("there is no text in the message to edit")) {
+        return;
+      } else {
+        console.error("[auction-runtime] Failed to edit current auction message", {
+          auctionId: auction.id,
+          messageId: auction.messageId,
+          error: err,
+        });
+        return;
+      }
     }
+
+    if (!shouldCreateNew) {
+      return;
+    }
+
+    console.error("[auction-runtime] Current auction message missing, creating new one", {
+      auctionId: auction.id,
+      messageId: auction.messageId,
+    });
   }
 
   const sent = await sendAuctionMessage(bot, auction.channelId, auction, true, false);
@@ -231,6 +261,12 @@ async function refreshAuctionMessageCountdown(
 }
 
 export async function startAuctionIfDue(prisma: PrismaClient, bot: TelegramBot, auctionId: string): Promise<void> {
+  await runInAuctionQueue(auctionId, async () => {
+    await startAuctionIfDueInternal(prisma, bot, auctionId);
+  });
+}
+
+async function startAuctionIfDueInternal(prisma: PrismaClient, bot: TelegramBot, auctionId: string): Promise<void> {
   const auction = await prisma.auction.findUnique({
     where: { id: auctionId },
     include: {
@@ -312,7 +348,7 @@ export async function handleBidCallback(
     const now = new Date();
     const lastBidTime = current.lastBidAt ?? current.startedAt ?? current.createdAt;
     if (now.getTime() - lastBidTime.getTime() >= current.bidTimeoutMinutes * 60 * 1000) {
-      await finishAuction(prisma, bot, current.id);
+      await finishAuctionInternal(prisma, bot, current.id);
       await bot.answerCallbackQuery(query.id, { text: "Аукцион завершён", show_alert: true });
       return;
     }
@@ -385,8 +421,9 @@ export async function handleBidCallback(
 
     if (outbidUser) {
       try {
-        await bot.sendMessage(updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
+        await sendMessageWithRetry(bot, updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
           message_thread_id: AUCTION_TARGET_THREAD_ID,
+          sourceMessageId: query.message?.message_id ?? null,
         });
       } catch (error) {
         console.error("[auction-runtime] Bid saved, but failed to send outbid notification", {
@@ -401,6 +438,12 @@ export async function handleBidCallback(
 }
 
 export async function finishAuction(prisma: PrismaClient, bot: TelegramBot, auctionId: string): Promise<void> {
+  await runInAuctionQueue(auctionId, async () => {
+    await finishAuctionInternal(prisma, bot, auctionId);
+  });
+}
+
+async function finishAuctionInternal(prisma: PrismaClient, bot: TelegramBot, auctionId: string): Promise<void> {
   const auction = await prisma.auction.findUnique({
     where: { id: auctionId },
     include: {
@@ -423,15 +466,38 @@ export async function finishAuction(prisma: PrismaClient, bot: TelegramBot, auct
     },
   });
 
+  const finalCaption = buildAuctionFinishedCaption(mapAuctionView(ended));
+
   if (ended.messageId) {
     try {
-      await bot.deleteMessage(ended.channelId, ended.messageId);
-    } catch (error) {
-      console.error("[auction-runtime] Failed to delete final live message", {
-        auctionId: ended.id,
-        messageId: ended.messageId,
-        error: error instanceof Error ? error.message : String(error),
+      await bot.editMessageCaption(finalCaption, {
+        chat_id: ended.channelId,
+        message_id: ended.messageId,
+        parse_mode: "HTML",
+        message_thread_id: AUCTION_TARGET_THREAD_ID,
+        reply_markup: { inline_keyboard: [] },
       });
+      return;
+    } catch (error) {
+      const err = error instanceof Error ? error.message : String(error);
+      if (!err.includes("message to edit not found")) {
+        try {
+          await bot.editMessageText(finalCaption, {
+            chat_id: ended.channelId,
+            message_id: ended.messageId,
+            parse_mode: "HTML",
+            message_thread_id: AUCTION_TARGET_THREAD_ID,
+            reply_markup: { inline_keyboard: [] },
+          });
+          return;
+        } catch (fallbackError) {
+          console.error("[auction-runtime] Failed to edit ended auction message", {
+            auctionId: ended.id,
+            messageId: ended.messageId,
+            error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          });
+        }
+      }
     }
   }
 
@@ -444,6 +510,17 @@ export async function finishAuction(prisma: PrismaClient, bot: TelegramBot, auct
 }
 
 export async function cancelAuction(
+  prisma: PrismaClient,
+  bot: TelegramBot,
+  auctionId: string,
+  canceledByUsername: string | null,
+): Promise<void> {
+  await runInAuctionQueue(auctionId, async () => {
+    await cancelAuctionInternal(prisma, bot, auctionId, canceledByUsername);
+  });
+}
+
+async function cancelAuctionInternal(
   prisma: PrismaClient,
   bot: TelegramBot,
   auctionId: string,
@@ -471,22 +548,44 @@ export async function cancelAuction(
     },
   });
 
+  const byText = canceledByUsername ? `@${canceledByUsername}` : "организатором";
+  const cancelText = `⛔️ Аукцион прерван ${byText}.\n🃏 Карта: ${ended.card.cardUrl ?? `https://remanga.org/card/${ended.card.id}`}`;
+
   if (ended.messageId) {
     try {
-      await bot.deleteMessage(ended.channelId, ended.messageId);
-    } catch (error) {
-      console.error("[auction-runtime] Failed to delete canceled auction message", {
-        auctionId: ended.id,
-        messageId: ended.messageId,
-        error: error instanceof Error ? error.message : String(error),
+      await bot.editMessageCaption(cancelText, {
+        chat_id: ended.channelId,
+        message_id: ended.messageId,
+        parse_mode: "HTML",
+        message_thread_id: AUCTION_TARGET_THREAD_ID,
+        reply_markup: { inline_keyboard: [] },
       });
+      return;
+    } catch (error) {
+      const err = error instanceof Error ? error.message : String(error);
+      if (!err.includes("message to edit not found")) {
+        try {
+          await bot.editMessageText(cancelText, {
+            chat_id: ended.channelId,
+            message_id: ended.messageId,
+            parse_mode: "HTML",
+            message_thread_id: AUCTION_TARGET_THREAD_ID,
+            reply_markup: { inline_keyboard: [] },
+          });
+          return;
+        } catch (fallbackError) {
+          console.error("[auction-runtime] Failed to edit canceled auction message", {
+            auctionId: ended.id,
+            messageId: ended.messageId,
+            error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          });
+        }
+      }
     }
   }
 
-  const byText = canceledByUsername ? `@${canceledByUsername}` : "организатором";
-  const cancelText = `⛔️ Аукцион прерван ${byText}.\n🃏 Карта: ${ended.card.cardUrl ?? `https://remanga.org/card/${ended.card.id}`}`;
   try {
-    await bot.sendPhoto(ended.channelId, toCoverUrl(ended.card.coverMid), {
+    await sendPhotoWithRetry(bot, ended.channelId, toCoverUrl(ended.card.coverMid), {
       caption: cancelText,
       parse_mode: "HTML",
       message_thread_id: AUCTION_TARGET_THREAD_ID,
@@ -496,7 +595,7 @@ export async function cancelAuction(
       auctionId: ended.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    await bot.sendMessage(ended.channelId, cancelText, {
+    await sendMessageWithRetry(bot, ended.channelId, cancelText, {
       disable_web_page_preview: true,
       message_thread_id: AUCTION_TARGET_THREAD_ID,
     });
@@ -560,37 +659,48 @@ async function refreshActiveAuctionCountdowns(prisma: PrismaClient, bot: Telegra
   });
 
   for (const auction of activeAuctions) {
-    const blockedUntil = auctionEditBlockedUntil.get(auction.id) ?? 0;
-    if (Date.now() < blockedUntil) continue;
+    await runInAuctionQueue(auction.id, async () => {
+      const blockedUntil = auctionEditBlockedUntil.get(auction.id) ?? 0;
+      if (Date.now() < blockedUntil) return;
 
-    const remainingMs = getRemainingMs(auction, Date.now());
-    if (remainingMs <= 0) {
-      await finishAuction(prisma, bot, auction.id);
-      continue;
-    }
-
-    if (!auction.messageId) {
-      await publishLiveMessage(prisma, bot, auction);
-      continue;
-    }
-
-    const refreshResult = await refreshAuctionMessageCountdown(bot, auction);
-    if (refreshResult.retryAfterMs) {
-      auctionEditBlockedUntil.set(auction.id, Date.now() + refreshResult.retryAfterMs);
-      continue;
-    }
-
-    if (refreshResult.messageMissing) {
-      const reset = await prisma.auction.update({
+      const fresh = await prisma.auction.findUnique({
         where: { id: auction.id },
-        data: { messageId: null },
         include: {
           card: true,
           bids: { orderBy: { createdAt: "desc" }, take: 3 },
         },
       });
-      await publishLiveMessage(prisma, bot, reset);
-    }
+      if (!fresh || fresh.status !== "ACTIVE") return;
+
+      const remainingMs = getRemainingMs(fresh, Date.now());
+      if (remainingMs <= 0) {
+        await finishAuctionInternal(prisma, bot, fresh.id);
+        return;
+      }
+
+      if (!fresh.messageId) {
+        await publishLiveMessage(prisma, bot, fresh);
+        return;
+      }
+
+      const refreshResult = await refreshAuctionMessageCountdown(bot, fresh);
+      if (refreshResult.retryAfterMs) {
+        auctionEditBlockedUntil.set(fresh.id, Date.now() + refreshResult.retryAfterMs);
+        return;
+      }
+
+      if (refreshResult.messageMissing) {
+        const reset = await prisma.auction.update({
+          where: { id: fresh.id },
+          data: { messageId: null },
+          include: {
+            card: true,
+            bids: { orderBy: { createdAt: "desc" }, take: 3 },
+          },
+        });
+        await publishLiveMessage(prisma, bot, reset);
+      }
+    });
   }
 }
 
@@ -615,5 +725,5 @@ export function initAuctionRuntime(prisma: PrismaClient, bot: TelegramBot): void
   void tick();
   setInterval(() => {
     void tick();
-  }, 3_000);
+  }, 5_000);
 }
