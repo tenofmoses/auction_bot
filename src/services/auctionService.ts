@@ -1,6 +1,61 @@
 import type { PrismaClient } from "@prisma/client";
 import type { AuctionStarter, CardApiResponse, CreatedAuctionDetails, ParsedAuctionCommand } from "../types/auction.js";
 
+const CARD_FETCH_TIMEOUT_MS = 8_000;
+const CARD_FETCH_ATTEMPTS = 3;
+
+function isRetryableFetchError(error: unknown): boolean {
+  const anyError = error as { name?: string; code?: string; message?: string };
+  if (anyError?.name === "AbortError") return true;
+
+  const code = anyError?.code ?? "";
+  const retryableCodes = new Set(["ETIMEDOUT", "ECONNRESET", "ECONNABORTED", "ENOTFOUND", "EAI_AGAIN", "EPIPE"]);
+  if (retryableCodes.has(code)) return true;
+
+  const message = (anyError?.message ?? String(error)).toLowerCase();
+  if (message.includes("timeout")) return true;
+  if (message.includes("network")) return true;
+  if (message.includes("fetch failed")) return true;
+  return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchCardData(cardId: number): Promise<CardApiResponse> {
+  let lastError: unknown = null;
+  const url = `https://api.remanga.org/api/inventory/cards/${cardId}/`;
+
+  for (let attempt = 1; attempt <= CARD_FETCH_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CARD_FETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        // 4xx are usually permanent; 5xx are transient and worth retrying.
+        if (response.status >= 500 && attempt < CARD_FETCH_ATTEMPTS) {
+          await sleep(300 * attempt);
+          continue;
+        }
+        throw new Error(`Failed to fetch card data: ${response.status} ${response.statusText}`);
+      }
+      return (await response.json()) as CardApiResponse;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= CARD_FETCH_ATTEMPTS || !isRetryableFetchError(error)) {
+        throw error;
+      }
+      await sleep(300 * attempt);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Failed to fetch card data");
+}
+
 export function parseAuctionCommand(commandText: string): ParsedAuctionCommand | null {
   const parts = commandText.split(/\s+/);
   if (parts.length < 2) return null;
@@ -79,17 +134,16 @@ export async function createAuction(
     cardId: command.cardId,
     cardUrl: command.cardUrl,
   });
-  const response = await fetch(`https://api.remanga.org/api/inventory/cards/${command.cardId}/`);
-  if (!response.ok) {
+  let cardData: CardApiResponse;
+  try {
+    cardData = await fetchCardData(command.cardId);
+  } catch (error) {
     console.error("[auction] Failed to fetch card data", {
       cardId: command.cardId,
-      status: response.status,
-      statusText: response.statusText,
+      error: error instanceof Error ? error.message : String(error),
     });
     throw new Error("Failed to fetch card data");
   }
-
-  const cardData = (await response.json()) as CardApiResponse;
   const coverMid = cardData.cover?.mid ?? "https://remanga.org/favicon.ico";
   const authorUsername = cardData.author?.username ?? "unknown_author";
   const authorId = cardData.author?.id ?? null;
