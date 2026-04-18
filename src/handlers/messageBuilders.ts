@@ -23,6 +23,17 @@ function formatUserName(telegramId: string | null, telegramUsername: string | nu
   return "неизвестно";
 }
 
+function formatTaggedUser(telegramId: string | null, telegramUsername: string | null): string {
+  if (telegramUsername) {
+    return `<a href="https://t.me/${telegramUsername}">@${telegramUsername}</a>`;
+  }
+  if (telegramId) {
+    const plain = `user_${telegramId}`;
+    return `<a href="tg://user?id=${telegramId}">${plain}</a>`;
+  }
+  return "неизвестно";
+}
+
 function formatBidLine(bid: RecentBid, index: number): string {
   const bidder = formatUserName(bid.bidderTelegramId, bid.bidderTelegramUsername);
   return `${index + 1}. ${bidder} — ${bid.totalPrice}`;
@@ -126,5 +137,22 @@ export function buildAuctionFinishedCaption(details: AuctionViewDetails): string
     liveCaptionWithTaggedOrganizer,
     "",
     `✅ Победитель: ${details.lastBids.length > 0 ? winnerTag : "нет ставок"}`,
+  ].join("\n");
+}
+
+export function buildAuctionFinishedAnnouncement(details: AuctionViewDetails): string {
+  const organizerTag = formatTaggedUser(details.starterTelegramId, details.starterTelegramUsername);
+  const winnerTag = details.lastBids.length > 0
+    ? formatTaggedUser(details.winnerTelegramId, details.winnerTelegramUsername)
+    : "нет ставок";
+  const finalPrice = details.currentPrice;
+
+  return [
+    "🏁 <b>Аукцион завершён</b>",
+    "",
+    `👤 Организатор: ${organizerTag}`,
+    `🏆 Победитель: ${winnerTag}`,
+    `💰 Итоговая ставка: <b>${finalPrice}</b>`,
+    `🃏 Карта: <a href="${details.cardUrl}">ссылка</a>`,
   ].join("\n");
 }

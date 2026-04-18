@@ -1,6 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 import type TelegramBot from "node-telegram-bot-api";
-import { buildAuctionFinishedCaption, buildAuctionLiveCaption } from "../handlers/messageBuilders.js";
+import {
+  buildAuctionFinishedAnnouncement,
+  buildAuctionFinishedCaption,
+  buildAuctionLiveCaption,
+} from "../handlers/messageBuilders.js";
 import { sendMessageWithRetry, sendPhotoWithRetry } from "./telegramDeliveryService.js";
 import type { AuctionViewDetails, AuctionWithCardAndBids, BidCallbackQuery } from "../types/auction.js";
 
@@ -90,6 +94,22 @@ async function pinAuctionMessage(bot: TelegramBot, chatId: string, messageId: nu
     console.error("[auction-runtime] Failed to pin auction message", {
       chatId,
       messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function unpinAuctionMessage(bot: TelegramBot, chatId: string, messageId?: number | null): Promise<void> {
+  try {
+    if (messageId) {
+      await bot.unpinChatMessage(chatId, { message_id: messageId });
+    } else {
+      await bot.unpinChatMessage(chatId);
+    }
+  } catch (error) {
+    console.error("[auction-runtime] Failed to unpin auction message", {
+      chatId,
+      messageId: messageId ?? null,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -546,7 +566,11 @@ async function finishAuctionInternal(prisma: PrismaClient, bot: TelegramBot, auc
     },
   });
 
-  const finalCaption = buildAuctionFinishedCaption(mapAuctionView(ended));
+  const view = mapAuctionView(ended);
+  const finalCaption = buildAuctionFinishedCaption(view);
+  const finalAnnouncement = buildAuctionFinishedAnnouncement(view);
+
+  await unpinAuctionMessage(bot, ended.channelId, ended.messageId);
 
   if (ended.messageId) {
     try {
@@ -557,7 +581,6 @@ async function finishAuctionInternal(prisma: PrismaClient, bot: TelegramBot, auc
         message_thread_id: AUCTION_TARGET_THREAD_ID,
         reply_markup: { inline_keyboard: [] },
       });
-      return;
     } catch (error) {
       const err = error instanceof Error ? error.message : String(error);
       if (!err.includes("message to edit not found")) {
@@ -569,7 +592,6 @@ async function finishAuctionInternal(prisma: PrismaClient, bot: TelegramBot, auc
             message_thread_id: AUCTION_TARGET_THREAD_ID,
             reply_markup: { inline_keyboard: [] },
           });
-          return;
         } catch (fallbackError) {
           console.error("[auction-runtime] Failed to edit ended auction message", {
             auctionId: ended.id,
@@ -581,11 +603,30 @@ async function finishAuctionInternal(prisma: PrismaClient, bot: TelegramBot, auc
     }
   }
 
-  await sendAuctionMessage(bot, ended.channelId, ended, false, true);
+  try {
+    await sendPhotoWithRetry(bot, ended.channelId, toCoverUrl(ended.card.coverMid), {
+      caption: finalAnnouncement,
+      parse_mode: "HTML",
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
+      dedupKey: `auction-finished:${ended.id}`,
+    });
+  } catch (error) {
+    console.error("[auction-runtime] Failed to send finished auction photo, fallback to text", {
+      auctionId: ended.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await sendMessageWithRetry(bot, ended.channelId, finalAnnouncement, {
+      parse_mode: "HTML",
+      message_thread_id: AUCTION_TARGET_THREAD_ID,
+      dedupKey: `auction-finished:${ended.id}`,
+    });
+  }
+
   console.log("[auction-runtime] Auction finished", {
     auctionId: ended.id,
     channelId: ended.channelId,
     winnerTelegramId: ended.winnerTelegramId,
+    finalPrice: ended.currentPrice ?? ended.startPrice ?? 0,
   });
 }
 
