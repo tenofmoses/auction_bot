@@ -10,6 +10,7 @@ const dedupCache = new Map<string, { message: Message; expiresAt: number }>();
 
 type DeliveryOptions = {
   sourceMessageId?: number | null;
+  dedupKey?: string;
 };
 
 type ReliableSendMessageOptions = SendMessageOptions & DeliveryOptions;
@@ -32,7 +33,11 @@ function buildDedupKey(
   chatId: string | number,
   threadId: number | undefined,
   sourceMessageId: number | null | undefined,
+  explicitDedupKey: string | undefined,
 ): string | null {
+  if (explicitDedupKey) {
+    return `${kind}:${String(chatId)}:${threadId ?? 0}:${explicitDedupKey}`;
+  }
   if (!sourceMessageId) return null;
   return `${kind}:${String(chatId)}:${threadId ?? 0}:${sourceMessageId}`;
 }
@@ -135,7 +140,13 @@ export async function sendMessageWithRetry(
   text: string,
   options: ReliableSendMessageOptions = {},
 ): Promise<Message> {
-  const dedupKey = buildDedupKey("message", chatId, options.message_thread_id, options.sourceMessageId);
+  const dedupKey = buildDedupKey(
+    "message",
+    chatId,
+    options.message_thread_id,
+    options.sourceMessageId,
+    options.dedupKey,
+  );
   const now = Date.now();
   cleanupDedupCache(now);
 
@@ -157,7 +168,7 @@ export async function sendMessageWithRetry(
       }
     }
 
-    const { sourceMessageId: _sourceMessageId, ...botOptions } = options;
+    const { sourceMessageId: _sourceMessageId, dedupKey: _dedupKey, ...botOptions } = options;
     const sent = await performWithRetry(() => bot.sendMessage(chatId, text, botOptions));
     if (!sent.message_id) {
       throw new Error("Telegram sendMessage returned no message_id");
@@ -179,7 +190,13 @@ export async function sendPhotoWithRetry(
   photo: string,
   options: ReliableSendPhotoOptions,
 ): Promise<Message> {
-  const dedupKey = buildDedupKey("photo", chatId, options.message_thread_id, options.sourceMessageId);
+  const dedupKey = buildDedupKey(
+    "photo",
+    chatId,
+    options.message_thread_id,
+    options.sourceMessageId,
+    options.dedupKey,
+  );
   const now = Date.now();
   cleanupDedupCache(now);
 
@@ -201,7 +218,7 @@ export async function sendPhotoWithRetry(
       }
     }
 
-    const { sourceMessageId: _sourceMessageId, ...botOptions } = options;
+    const { sourceMessageId: _sourceMessageId, dedupKey: _dedupKey, ...botOptions } = options;
     const sent = await performWithRetry(() => bot.sendPhoto(chatId, photo, botOptions));
     if (!sent.message_id) {
       throw new Error("Telegram sendPhoto returned no message_id");
