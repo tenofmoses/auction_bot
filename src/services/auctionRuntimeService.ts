@@ -518,6 +518,7 @@ export async function handleBidCallback(
       try {
         await sendMessageWithRetry(bot, updated.channelId, `⚠️ ${outbidUser}, вашу ставку перебили.`, {
           message_thread_id: AUCTION_TARGET_THREAD_ID,
+          reply_to_message_id: updated.messageId ?? undefined,
           dedupKey: `outbid:${query.id}`,
         });
         console.log("[auction-runtime] Outbid notification sent", {

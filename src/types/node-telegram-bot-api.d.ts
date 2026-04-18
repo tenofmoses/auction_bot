@@ -43,6 +43,7 @@ declare module 'node-telegram-bot-api' {
     parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
     disable_web_page_preview?: boolean;
     message_thread_id?: number;
+    reply_to_message_id?: number;
     reply_markup?: {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
