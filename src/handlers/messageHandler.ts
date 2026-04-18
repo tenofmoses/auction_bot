@@ -78,8 +78,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     const messageThreadId = msg.message_thread_id ?? null;
     const text = msg.text;
     const normalizedText = text?.trim();
-    const isTargetThread =
-      chatId.toString() === AUCTION_TARGET_CHAT_ID && messageThreadId === AUCTION_TARGET_THREAD_ID;
+    const isTargetThread = chatId.toString() === AUCTION_TARGET_CHAT_ID && messageThreadId === AUCTION_TARGET_THREAD_ID;
     const isPrivateChat = chatType === "private";
 
     if (!isTargetThread && !isPrivateChat) {
@@ -87,16 +86,8 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     }
 
     console.log("[message] Received update", {
-      messageId: msg.message_id ?? null,
-      messageThreadId,
-      replyToMessageId: msg.reply_to_message?.message_id ?? null,
-      chatId,
-      chatType,
-      userId: msg.from?.id ?? null,
       username: msg.from?.username ?? null,
       text: normalizedText ?? null,
-      isTargetThread,
-      isPrivateChat,
     });
 
     const repliedMessageId = msg.reply_to_message?.message_id ?? null;
@@ -104,10 +95,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     const isStopCommand = normalizedText?.toLowerCase() === "стоп";
     if (repliedMessageId && sender?.id && isStopCommand) {
       console.log("[message] Stop command received", {
-        chatId,
-        messageId: msg.message_id ?? null,
         replyToMessageId: repliedMessageId,
-        senderId: sender.id,
         senderUsername: sender.username ?? null,
       });
       let replyAuction = await prisma.auction.findFirst({
@@ -154,7 +142,6 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
         if (!isOrganizer) {
           console.log("[message] Stop command ignored: not organizer", {
             auctionId: replyAuction.id,
-            senderId,
             senderUsername,
           });
           return;
@@ -162,7 +149,6 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
 
         console.log("[message] Stop command accepted", {
           auctionId: replyAuction.id,
-          senderId,
           senderUsername,
         });
         await cancelAuction(prisma, bot, replyAuction.id, sender.username ?? null);
@@ -175,12 +161,12 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
       });
     }
 
-    if (normalizedText?.toLowerCase() === "/start" || normalizedText?.toLowerCase() === "/help" || normalizedText?.toLowerCase() === "аукцион") {
-      console.log("[message] Sending auction rules", {
-        messageId: msg.message_id ?? null,
-        chatId,
-        senderId: msg.from?.id ?? null,
-      });
+    if (
+      normalizedText?.toLowerCase() === "/start" ||
+      normalizedText?.toLowerCase() === "/help" ||
+      normalizedText?.toLowerCase() === "аукцион"
+    ) {
+      console.log("[message] Sending auction rules");
       await sendMessageWithRetry(bot, AUCTION_TARGET_CHAT_ID, buildAuctionRulesMessage(), {
         parse_mode: "HTML",
         sourceMessageId: msg.message_id ?? null,
@@ -191,9 +177,6 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
 
     if (!normalizedText || !normalizedText.toLowerCase().startsWith("аукцион ")) {
       console.log("[message] Unsupported command format", {
-        chatId,
-        messageId: msg.message_id ?? null,
-        senderId: msg.from?.id ?? null,
         text: normalizedText ?? null,
       });
       return;
@@ -202,7 +185,6 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     const command = parseAuctionCommand(normalizedText);
     if (!command) {
       console.log("[message] Auction command parse failed", {
-        chatId,
         messageId: msg.message_id ?? null,
         text: normalizedText,
       });
@@ -219,26 +201,18 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     }
 
     try {
-      const auctionDetails = await createAuction(
-        prisma,
-        command,
-        AUCTION_TARGET_CHAT_ID,
-        {
-          telegramId: msg.from?.id ? String(msg.from.id) : null,
-          telegramUsername: msg.from?.username ?? null,
-        },
-      );
+      const auctionDetails = await createAuction(prisma, command, AUCTION_TARGET_CHAT_ID, {
+        telegramId: msg.from?.id ? String(msg.from.id) : null,
+        telegramUsername: msg.from?.username ?? null,
+      });
 
-      const isFutureStart = Boolean(
-        auctionDetails.startTime && auctionDetails.startTime.getTime() > Date.now(),
-      );
+      const isFutureStart = Boolean(auctionDetails.startTime && auctionDetails.startTime.getTime() > Date.now());
       console.log("[message] Auction created successfully", {
         auctionId: auctionDetails.auctionId,
         cardUrl: auctionDetails.cardUrl,
         isFutureStart,
         chatId: AUCTION_TARGET_CHAT_ID,
         threadId: AUCTION_TARGET_THREAD_ID,
-        senderId: msg.from?.id ?? null,
         senderUsername: msg.from?.username ?? null,
       });
 
@@ -257,10 +231,7 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
               data: { messageId: sent.message_id },
             });
             await pinAuctionMessage(bot, sent.message_id);
-            console.log("[message] Planned auction message published (photo)", {
-              auctionId: auctionDetails.auctionId,
-              messageId: sent.message_id,
-            });
+            console.log("[message] Planned auction message published (photo)");
           }
         } catch {
           const sent = await sendMessageWithRetry(bot, AUCTION_TARGET_CHAT_ID, plannedText, {
@@ -276,16 +247,13 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
             await pinAuctionMessage(bot, sent.message_id);
             console.log("[message] Planned auction message published (text fallback)", {
               auctionId: auctionDetails.auctionId,
-              messageId: sent.message_id,
             });
           }
         }
         return;
       }
 
-      console.log("[message] Starting auction immediately", {
-        auctionId: auctionDetails.auctionId,
-      });
+      console.log("[message] Starting auction immediately");
       await startAuctionIfDue(prisma, bot, auctionDetails.auctionId);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
