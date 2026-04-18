@@ -83,12 +83,6 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     const isPrivateChat = chatType === "private";
 
     if (!isTargetThread && !isPrivateChat) {
-      console.log("[message] Ignored: not target thread/private", {
-        messageId: msg.message_id ?? null,
-        chatId,
-        chatType,
-        messageThreadId,
-      });
       return;
     }
 
@@ -196,8 +190,10 @@ export function registerMessageHandler(bot: TelegramBot, prisma: PrismaClient, _
     }
 
     if (!normalizedText || !normalizedText.toLowerCase().startsWith("аукцион ")) {
-      console.log("[message] Ignored: text does not match command format", {
+      console.log("[message] Unsupported command format", {
         chatId,
+        messageId: msg.message_id ?? null,
+        senderId: msg.from?.id ?? null,
         text: normalizedText ?? null,
       });
       return;

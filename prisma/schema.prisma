@@ -68,3 +68,13 @@ model Bid {
 
   @@index([auctionId, createdAt(sort: Desc)])
 }
+
+model ProcessedBidCallback {
+  callbackId       String   @id
+  auctionId        String
+  bidderTelegramId String
+  increment        Int
+  createdAt        DateTime @default(now())
+
+  @@index([auctionId, createdAt(sort: Desc)])
+}
