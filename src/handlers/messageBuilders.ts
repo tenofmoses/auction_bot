@@ -24,12 +24,13 @@ function formatUserName(telegramId: string | null, telegramUsername: string | nu
 }
 
 function formatTaggedUser(telegramId: string | null, telegramUsername: string | null): string {
+  // For @username we keep plain mention text so Telegram treats it as a direct tag.
   if (telegramUsername) {
-    return `<a href="https://t.me/${telegramUsername}">@${telegramUsername}</a>`;
+    return `@${telegramUsername}`;
   }
+  // Fallback to deep-link mention by numeric id when username is absent.
   if (telegramId) {
-    const plain = `user_${telegramId}`;
-    return `<a href="tg://user?id=${telegramId}">${plain}</a>`;
+    return `<a href="tg://user?id=${telegramId}">user_${telegramId}</a>`;
   }
   return "неизвестно";
 }
@@ -57,9 +58,7 @@ export function buildAuctionPlannedMessage(details: CreatedAuctionDetails): stri
   const hasManga = details.titleDir !== "unknown" && details.titleMainName !== "Не указано";
   const hasAuthor = details.authorUsername !== "unknown_author";
   const hasCharacter = Boolean(details.characterName);
-  const organizerText = details.starterTelegramUsername
-    ? `@${details.starterTelegramUsername}`
-    : "организатор";
+  const organizerText = details.starterTelegramUsername ? `@${details.starterTelegramUsername}` : "организатор";
   const organizerUrl = details.starterTelegramUsername
     ? `https://t.me/${details.starterTelegramUsername}`
     : details.starterTelegramId
@@ -122,9 +121,7 @@ export function buildAuctionLiveCaption(details: AuctionViewDetails, remainingMs
 
 export function buildAuctionFinishedCaption(details: AuctionViewDetails): string {
   const organizerPlain = formatUserName(details.starterTelegramId, details.starterTelegramUsername);
-  const organizerTag = details.starterTelegramUsername
-    ? `@${details.starterTelegramUsername}`
-    : organizerPlain;
+  const organizerTag = details.starterTelegramUsername ? `@${details.starterTelegramUsername}` : organizerPlain;
   const winnerTag = details.winnerTelegramUsername
     ? `@${details.winnerTelegramUsername}`
     : formatUserName(details.winnerTelegramId, details.winnerTelegramUsername);
@@ -142,9 +139,10 @@ export function buildAuctionFinishedCaption(details: AuctionViewDetails): string
 
 export function buildAuctionFinishedAnnouncement(details: AuctionViewDetails): string {
   const organizerTag = formatTaggedUser(details.starterTelegramId, details.starterTelegramUsername);
-  const winnerTag = details.lastBids.length > 0
-    ? formatTaggedUser(details.winnerTelegramId, details.winnerTelegramUsername)
-    : "нет ставок";
+  const winnerTag =
+    details.lastBids.length > 0
+      ? formatTaggedUser(details.winnerTelegramId, details.winnerTelegramUsername)
+      : "нет ставок";
   const finalPrice = details.currentPrice;
 
   return [
